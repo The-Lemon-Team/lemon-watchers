@@ -1,0 +1,119 @@
+<div class="space-y-4">
+  <!-- Control & Status Banner -->
+  <div class="bg-dark-850 p-4 rounded-xl border border-dark-700/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <div class="flex items-center space-x-2">
+        <h2 class="text-base font-bold text-white flex items-center space-x-2">
+          <span>⚡</span>
+          <span>Хроника активности потоков (Whole Story)</span>
+        </h2>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-lemon-500/10 text-lemon-400 border border-lemon-500/20 font-mono">
+          SSE Live
+        </span>
+      </div>
+      <p class="text-xs text-slate-400 mt-1">
+        Единый поток событий сборщиков новостей: получение публикаций (+N), проверки без дельт (304), ошибки и работа через прокси
+      </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <!-- Active mutex streams pill -->
+      <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-dark-800 border border-dark-700 text-xs">
+        <span class="w-2 h-2 rounded-full" [ngClass]="anyActiveWatchers() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'"></span>
+        <span class="text-slate-400">Mutex потоков:</span>
+        <span class="font-bold text-slate-200">{{ activeWatchersCount() }} / {{ totalWatchersCount() }}</span>
+      </div>
+
+      <!-- Toggle proxy logs checkbox -->
+      <label class="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-dark-800 border border-dark-700 text-xs text-slate-300 cursor-pointer hover:bg-dark-750 transition select-none">
+        <input
+          type="checkbox"
+          [checked]="includeProxyLogs()"
+          (change)="toggleProxyLogs.emit()"
+          class="rounded bg-dark-900 border-dark-600 text-lemon-500 focus:ring-0 focus:ring-offset-0" />
+        <span>Включить запросы прокси</span>
+      </label>
+
+      <button
+        (click)="loadStory.emit()"
+        class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-700 text-slate-300 hover:text-white text-xs font-medium transition flex items-center space-x-1">
+        <span>🔄</span>
+        <span>Обновить</span>
+      </button>
+
+      <button
+        (click)="clearEvents.emit()"
+        class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-700 text-slate-400 hover:text-slate-200 text-xs transition">
+        Очистить
+      </button>
+    </div>
+  </div>
+
+  <!-- Story Event List -->
+  <div class="bg-dark-850 rounded-xl border border-dark-700/80 p-4">
+    <div class="space-y-2.5 max-h-[650px] overflow-y-auto custom-scrollbar pr-1">
+      @for (event of storyEvents(); track event.id) {
+        <div class="p-3 rounded-lg border transition flex items-start justify-between gap-3"
+          [ngClass]="{
+            'bg-emerald-950/20 border-emerald-500/20 hover:border-emerald-500/40': event.type === 'NEWS_COLLECTED',
+            'bg-dark-800/40 border-dark-700/60 hover:border-dark-600': event.type === 'NO_UPDATES',
+            'bg-rose-950/20 border-rose-500/20 hover:border-rose-500/40': event.type === 'FLOW_ERROR',
+            'bg-cyan-950/15 border-cyan-500/20 hover:border-cyan-500/30': event.type === 'PROXY_LOG'
+          }">
+          <div class="flex items-start space-x-3">
+            <!-- Type Icon Badge -->
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 font-bold text-sm mt-0.5"
+              [ngClass]="{
+                'bg-emerald-500/20 text-emerald-400': event.type === 'NEWS_COLLECTED',
+                'bg-slate-700/50 text-slate-400': event.type === 'NO_UPDATES',
+                'bg-rose-500/20 text-rose-400': event.type === 'FLOW_ERROR',
+                'bg-cyan-500/20 text-cyan-400': event.type === 'PROXY_LOG'
+              }">
+              @switch (event.type) {
+                @case ('NEWS_COLLECTED') { 🟢 }
+                @case ('NO_UPDATES') { 💤 }
+                @case ('FLOW_ERROR') { ⚠️ }
+                @case ('PROXY_LOG') { 🌐 }
+                @default { ℹ️ }
+              }
+            </div>
+
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-xs font-bold text-white">{{ event.title }}</span>
+                @if (event.statusCode) {
+                  <span class="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold"
+                    [ngClass]="event.statusCode === 304 ? 'bg-blue-500/20 text-blue-400' : event.statusCode < 400 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'">
+                    HTTP {{ event.statusCode }}
+                  </span>
+                }
+                @if (event.latencyMs) {
+                  <span class="text-[10px] font-mono text-slate-400">{{ event.latencyMs }}ms</span>
+                }
+                @if (event.newItemsCount && event.newItemsCount > 0) {
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                    +{{ event.newItemsCount }} нов.
+                  </span>
+                }
+              </div>
+
+              <p class="text-xs text-slate-300 mt-1 leading-relaxed">
+                {{ event.description }}
+              </p>
+            </div>
+          </div>
+
+          <div class="text-[11px] font-mono text-slate-500 shrink-0 whitespace-nowrap">
+            {{ formatDate(event.timestamp) }}
+          </div>
+        </div>
+      } @empty {
+        <div class="text-center py-12 text-slate-500">
+          <span class="text-3xl block mb-2">📜</span>
+          <p class="text-sm font-medium">Хроника пуста</p>
+          <p class="text-xs mt-1 text-slate-600">События опросов и сетевых запросов отобразятся здесь при их поступлении</p>
+        </div>
+      }
+    </div>
+  </div>
+</div>

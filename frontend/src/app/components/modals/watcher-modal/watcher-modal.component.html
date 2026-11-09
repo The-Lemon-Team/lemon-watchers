@@ -1,0 +1,129 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (close)="onClose()"
+  maxWidth="max-w-lg"
+  panelClass="p-5 space-y-4"
+>
+  <div class="flex items-center justify-between border-b border-dark-750 pb-3">
+    <div class="flex items-center space-x-2">
+      <span class="text-xl">{{ mode() === 'create' ? '📡' : '✏️' }}</span>
+      <h3 class="text-base font-bold text-white">
+        {{ mode() === 'create' ? 'Добавить новый вотчер' : 'Редактировать вотчер' }}
+      </h3>
+    </div>
+    <button (click)="onClose()" class="text-slate-400 hover:text-white" aria-label="Закрыть">✕</button>
+  </div>
+
+  <div class="space-y-3 text-xs">
+    <!-- URL with validate button (for create) or URL input (for edit) -->
+    <div>
+      <label class="block text-slate-400 mb-1 font-medium">URL первоисточника (RSS / Atom / JSON) *</label>
+      <div class="flex space-x-2">
+        <input
+          type="url"
+          [(ngModel)]="url"
+          placeholder="https://example.com/rss.xml"
+          class="flex-1 bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition font-mono text-xs" />
+        @if (mode() === 'create') {
+          <button
+            (click)="onValidate()"
+            [disabled]="!url.trim() || isValidatingUrl()"
+            class="px-3 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 text-lemon-400 font-semibold border border-dark-700 disabled:opacity-50 whitespace-nowrap">
+            {{ isValidatingUrl() ? 'Проверка...' : '🔍 Проверить' }}
+          </button>
+        }
+      </div>
+
+      <!-- Validation result banner -->
+      @if (mode() === 'create' && validationResult()) {
+        <div class="mt-2 p-2 rounded-lg text-xs"
+          [ngClass]="validationResult()?.valid ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/10 text-red-400 border border-red-500/30'">
+          @if (validationResult()?.valid) {
+            <span>✅ Поток валиден! Найдено постов: {{ validationResult()?.itemsCount }}</span>
+          } @else {
+            <span>❌ Ошибка: {{ validationResult()?.error }}</span>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Title -->
+    <div>
+      <label class="block text-slate-400 mb-1 font-medium">Название источника *</label>
+      <input
+        type="text"
+        [(ngModel)]="title"
+        placeholder="Например: Блог OpenAI"
+        class="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition" />
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <!-- Category / Folder -->
+      <div>
+        <label class="block text-slate-400 mb-1 font-medium">Папка (категория) *</label>
+        <select
+          [(ngModel)]="category"
+          class="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition">
+          @for (f of folders(); track f.slug) {
+            <option [value]="f.slug">{{ f.icon }} {{ f.title }}</option>
+          }
+        </select>
+      </div>
+
+      <!-- Protocol -->
+      <div>
+        <label class="block text-slate-400 mb-1 font-medium">Протокол</label>
+        <select
+          [(ngModel)]="protocol"
+          class="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition font-mono">
+          <option value="rss">RSS 2.0</option>
+          <option value="atom">Atom Feed</option>
+          <option value="json_api">REST / JSON API</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <!-- Poll Interval -->
+      <div>
+        <label class="block text-slate-400 mb-1 font-medium">Интервал опроса (минуты)</label>
+        <input
+          type="number"
+          min="1"
+          max="1440"
+          [(ngModel)]="pollIntervalMinutes"
+          class="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition font-mono" />
+      </div>
+
+      <!-- Default tags -->
+      <div>
+        <label class="block text-slate-400 mb-1 font-medium">Теги по умолчанию</label>
+        <input
+          type="text"
+          [(ngModel)]="defaultTags"
+          placeholder="ai, tech, releases"
+          class="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition" />
+      </div>
+    </div>
+
+    <!-- Description -->
+    <div>
+      <label class="block text-slate-400 mb-1 font-medium">Описание (необязательно)</label>
+      <textarea
+        [(ngModel)]="description"
+        rows="2"
+        placeholder="О чём пишет данный источник..."
+        class="w-full bg-dark-800 border border-dark-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-lemon-500 transition custom-scrollbar"></textarea>
+    </div>
+  </div>
+
+  <div class="flex justify-end space-x-2 pt-2 border-t border-dark-750">
+    <button (click)="onClose()" class="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-750 text-slate-300 text-xs font-semibold">Отмена</button>
+    <button
+      (click)="onSubmit()"
+      [disabled]="!title.trim() || !url.trim()"
+      class="px-4 py-2 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 text-xs font-bold disabled:opacity-50 transition">
+      {{ mode() === 'create' ? 'Добавить вотчер' : 'Сохранить изменения' }}
+    </button>
+  </div>
+</app-modal>

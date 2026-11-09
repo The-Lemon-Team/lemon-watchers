@@ -1,0 +1,307 @@
+<div class="space-y-4 w-full min-w-0">
+  <!-- Controls: View mode switch, Search, Pagination summary -->
+  <div class="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="text-base font-bold text-white flex items-center space-x-2">
+        <span>Собранные заметки</span>
+        <span class="text-xs font-normal text-slate-400">({{ articlesTotal() }})</span>
+      </h2>
+
+      <!-- View mode switch -->
+      <div class="flex rounded-lg bg-dark-800 p-0.5 border border-dark-700 text-xs">
+        <button
+          (click)="articlesViewModeChange.emit('table')"
+          class="px-2.5 py-1 rounded-md transition"
+          [ngClass]="articlesViewMode() === 'table' ? 'bg-lemon-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'">
+          Таблица
+        </button>
+        <button
+          (click)="articlesViewModeChange.emit('cards')"
+          class="px-2.5 py-1 rounded-md transition"
+          [ngClass]="articlesViewMode() === 'cards' ? 'bg-lemon-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'">
+          Карточки
+        </button>
+      </div>
+
+      <!-- LemonBus Bridge status pill -->
+      <div class="flex items-center space-x-2 px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 text-xs font-mono">
+        <span class="text-slate-400">LemonBus:</span>
+        <span class="text-emerald-400 font-semibold">{{ busStatus()?.published ?? 0 }} в шине</span>
+        <span class="text-slate-500">/</span>
+        <span class="text-amber-400 font-semibold">{{ busStatus()?.pending ?? 0 }} не отправлено</span>
+      </div>
+
+      <!-- Bulk publish to LemonBus button -->
+      @if ((busStatus()?.pending ?? 0) > 0) {
+        <button
+          (click)="publishAllPendingToBus.emit()"
+          [disabled]="isPublishingAllBus()"
+          class="px-3 py-1 rounded-lg bg-lemon-500/20 hover:bg-lemon-500/30 text-lemon-400 border border-lemon-500/30 text-xs font-semibold transition active:scale-95 disabled:opacity-50 flex items-center space-x-1.5 shadow">
+          <span>📤</span>
+          <span>{{ isPublishingAllBus() ? 'Передача...' : 'Опубликовать все в LemonBus' }}</span>
+        </button>
+      }
+    </div>
+
+    <div class="flex items-center space-x-3">
+      <div class="relative w-full sm:w-72">
+        <input
+          type="text"
+          [value]="searchQuery()"
+          (input)="onSearchInput($event)"
+          placeholder="Поиск по статьям..."
+          class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-lemon-500 transition" />
+        <span class="absolute right-2.5 top-2 text-xs text-slate-500">🔍</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Batch Action Banner for Articles -->
+  @if (selectedArticleIds().size > 0) {
+    <div class="bg-gradient-to-r from-lemon-500/15 via-emerald-500/15 to-transparent border border-lemon-500/30 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+      <div class="flex items-center space-x-2">
+        <span class="px-2.5 py-1 rounded-full bg-lemon-500 text-slate-950 font-bold text-xs">
+          Выбрано: {{ selectedArticleIds().size }}
+        </span>
+        <span class="text-xs text-slate-300">
+          заметок для передачи в LemonBus ➜ Lemon Seasons
+        </span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button
+          (click)="publishSelectedArticlesToBus.emit()"
+          [disabled]="isBatchActionRunning()"
+          class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow disabled:opacity-50">
+          <span>📤</span>
+          <span>{{ isBatchActionRunning() ? 'Отправка...' : 'Отправить в LemonBus (➜ Seasons)' }}</span>
+        </button>
+        <button
+          (click)="clearSelectedArticles.emit()"
+          class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-700 text-xs transition">
+          Снять выбор
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- 2A. ARTICLES TABLE VIEW -->
+  @if (articlesViewMode() === 'table') {
+    <div class="w-full min-w-0 overflow-x-auto rounded-xl border border-dark-700/80 bg-dark-850 shadow custom-scrollbar">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-dark-700 bg-dark-800/80 text-slate-400 font-semibold uppercase tracking-wider text-[11px]">
+            <th class="py-2.5 sm:py-3 px-2 sm:px-3 text-center w-8">
+              <input
+                type="checkbox"
+                [checked]="isAllArticlesSelected()"
+                (change)="toggleAllArticlesSelect.emit()"
+                class="rounded bg-dark-900 border-dark-600 text-lemon-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                title="Выбрать все заметки на текущей странице" />
+            </th>
+            <th class="py-2.5 sm:py-3 px-2 sm:px-3 text-center">Score</th>
+            <th class="py-2.5 sm:py-3 px-3 sm:px-4">Заголовок &amp; Выжимка</th>
+            <th class="py-2.5 sm:py-3 px-2 sm:px-3 hidden sm:table-cell">Папка</th>
+            <th class="py-2.5 sm:py-3 px-2 sm:px-3 hidden md:table-cell">Источник</th>
+            <th class="py-2.5 sm:py-3 px-2 sm:px-3 hidden lg:table-cell">Теги</th>
+            <th class="py-2.5 sm:py-3 px-2 sm:px-3 hidden sm:table-cell">Дата публикации</th>
+            <th class="py-2.5 sm:py-3 px-3 sm:px-4 text-right">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-dark-750">
+          @for (item of articles(); track item.id) {
+            <tr class="hover:bg-dark-800/50 transition" [class.bg-dark-800/40]="selectedArticleIds().has(item.id)">
+              <!-- Checkbox -->
+              <td class="py-2.5 sm:py-3 px-2 sm:px-3 text-center whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  [checked]="selectedArticleIds().has(item.id)"
+                  (change)="toggleArticleSelect.emit(item.id)"
+                  class="rounded bg-dark-900 border-dark-600 text-lemon-500 focus:ring-0 focus:ring-offset-0 cursor-pointer" />
+              </td>
+
+              <!-- Resonance Score -->
+              <td class="py-2.5 sm:py-3 px-2 sm:px-3 text-center whitespace-nowrap">
+                <span
+                  class="inline-flex items-center space-x-1 px-1.5 sm:px-2 py-0.5 rounded-full font-mono text-[11px] font-bold border"
+                  [ngClass]="item.resonanceScore >= 75 ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-slate-700/30 text-slate-400 border-dark-700'">
+                  <span>⚡</span>
+                  <span>{{ item.resonanceScore }}</span>
+                </span>
+              </td>
+
+              <!-- Title & Summary -->
+              <td class="py-2.5 sm:py-3 px-3 sm:px-4 min-w-[170px] max-w-xs md:max-w-md lg:max-w-xl">
+                <div (click)="openArticleModal.emit(item)" class="font-bold text-white text-xs sm:text-sm hover:text-lemon-400 transition cursor-pointer line-clamp-2">
+                  {{ item.title || 'Без названия' }}
+                </div>
+                @if (item.summary) {
+                  <p class="text-slate-400 text-xs mt-1 line-clamp-1 leading-relaxed">
+                    {{ item.summary }}
+                  </p>
+                }
+                <!-- Mobile/tablet subtitle for source & date when columns are hidden -->
+                <div class="flex items-center space-x-2 mt-1 text-[11px] text-slate-400 md:hidden">
+                  <span class="truncate max-w-[120px] text-slate-300 font-medium">{{ item.watcherTitle || item.watcherSlug }}</span>
+                  <span class="text-slate-600 sm:hidden">•</span>
+                  <span class="font-mono text-slate-500 sm:hidden">{{ formatDate(item.publishedAt) }}</span>
+                </div>
+              </td>
+
+              <!-- Folder -->
+              <td class="py-2.5 sm:py-3 px-2 sm:px-3 whitespace-nowrap hidden sm:table-cell">
+                @let fInfo = getFolderInfo(item.category);
+                <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded-md bg-dark-750 text-slate-300 border border-dark-700 text-[11px]" [title]="fInfo.title">
+                  <span>{{ fInfo.icon }}</span>
+                  <span class="hidden md:inline">{{ fInfo.title }}</span>
+                </span>
+              </td>
+
+              <!-- Watcher Title -->
+              <td class="py-2.5 sm:py-3 px-2 sm:px-3 whitespace-nowrap text-slate-300 font-medium max-w-[130px] truncate hidden md:table-cell" [title]="item.watcherTitle || item.watcherSlug || ''">
+                {{ item.watcherTitle || item.watcherSlug || 'Источник' }}
+              </td>
+
+              <!-- Tags -->
+              <td class="py-2.5 sm:py-3 px-2 sm:px-3 max-w-xs hidden lg:table-cell">
+                <div class="flex flex-wrap gap-1">
+                  @for (t of (item.tags || []).slice(0, 3); track t) {
+                    <span class="px-1.5 py-0.2 rounded bg-dark-800 text-slate-400 border border-dark-700/60 text-[10px]">#{{ t }}</span>
+                  }
+                </div>
+              </td>
+
+              <!-- Published Date -->
+              <td class="py-2.5 sm:py-3 px-2 sm:px-3 whitespace-nowrap text-slate-400 font-mono text-[11px] hidden sm:table-cell">
+                {{ formatDate(item.publishedAt) }}
+              </td>
+
+              <!-- Actions -->
+              <td class="py-2.5 sm:py-3 px-3 sm:px-4 text-right whitespace-nowrap space-x-1.5 sm:space-x-2">
+                @if (item.busPublishedAt) {
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono" title="Передано в шину LemonBus">
+                    ✅ В шине
+                  </span>
+                } @else {
+                  <button
+                    (click)="publishSingleToBus.emit(item)"
+                    [disabled]="publishingBusIds().has(item.id)"
+                    class="px-2 py-1 rounded bg-dark-800 hover:bg-lemon-500 hover:text-slate-950 text-lemon-400 border border-lemon-500/30 text-[11px] font-medium transition disabled:opacity-50"
+                    title="Передать заметку в LemonBus">
+                    {{ publishingBusIds().has(item.id) ? '...' : '📤 В шину' }}
+                  </button>
+                }
+                <button
+                  (click)="openArticleModal.emit(item)"
+                  class="px-2 sm:px-2.5 py-1 rounded bg-dark-750 hover:bg-lemon-500 hover:text-slate-950 text-slate-300 border border-dark-700 font-semibold transition text-xs">
+                  Выжимка
+                </button>
+                <a
+                  [href]="item.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="text-lemon-400 hover:underline inline-flex items-center text-xs p-1"
+                  title="Открыть первоисточник">
+                  <span>↗</span>
+                </a>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="8" class="text-center py-12 text-slate-400">
+                <div class="text-2xl mb-1">📭</div>
+                <div>Статей не найдено</div>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+
+  <!-- 2B. ARTICLES CARDS VIEW -->
+  @if (articlesViewMode() === 'cards') {
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      @for (item of articles(); track item.id) {
+        <article
+          class="p-4 rounded-xl bg-dark-850 border border-dark-700/80 hover:border-dark-700 transition space-y-2 flex flex-col justify-between"
+          [class.border-lemon-500/50]="selectedArticleIds().has(item.id)">
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1.5">
+              <div class="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  [checked]="selectedArticleIds().has(item.id)"
+                  (change)="toggleArticleSelect.emit(item.id)"
+                  class="rounded bg-dark-900 border-dark-600 text-lemon-500 focus:ring-0 focus:ring-offset-0 cursor-pointer" />
+                @let fInfo = getFolderInfo(item.category);
+                <span class="px-2 py-0.5 rounded-md font-semibold border bg-dark-750 text-slate-300 border-dark-700 text-[11px]">
+                  {{ fInfo.icon }} {{ fInfo.title }}
+                </span>
+                <span class="text-slate-400 font-medium">{{ item.watcherTitle || item.watcherSlug }}</span>
+                <span class="text-slate-600">•</span>
+                <span class="text-slate-400 font-mono">{{ formatDate(item.publishedAt) }}</span>
+              </div>
+
+              <div class="flex items-center space-x-1 px-2 py-0.5 rounded-full border text-[11px] font-mono"
+                [ngClass]="item.resonanceScore >= 75 ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-slate-700/30 text-slate-400 border-dark-700'">
+                <span>⚡</span>
+                <span>{{ item.resonanceScore }}</span>
+              </div>
+            </div>
+
+            <h3 (click)="openArticleModal.emit(item)" class="text-sm font-bold text-white hover:text-lemon-400 transition cursor-pointer">
+              {{ item.title }}
+            </h3>
+
+            @if (item.summary) {
+              <p class="text-xs text-slate-300 mt-1 line-clamp-2 leading-relaxed">
+                {{ item.summary }}
+              </p>
+            }
+          </div>
+
+          <div class="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-dark-800 text-xs">
+            <div class="flex flex-wrap gap-1">
+              @for (t of item.tags; track t) {
+                <span class="px-2 py-0.5 rounded bg-dark-800 text-slate-400 border border-dark-700/60 text-[11px]">#{{ t }}</span>
+              }
+            </div>
+            <div class="flex items-center space-x-2 text-slate-400">
+              @if (item.busPublishedAt) {
+                <span class="text-[10px] text-emerald-400 font-mono">✅ В шине</span>
+              } @else {
+                <button
+                  (click)="publishSingleToBus.emit(item)"
+                  [disabled]="publishingBusIds().has(item.id)"
+                  class="text-[11px] text-lemon-400 hover:underline disabled:opacity-50">
+                  {{ publishingBusIds().has(item.id) ? '...' : '📤 В шину' }}
+                </button>
+              }
+              <button (click)="openArticleModal.emit(item)" class="text-xs text-lemon-400 hover:underline font-medium">Читать</button>
+              <a [href]="item.url" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-white">Оригинал ↗</a>
+            </div>
+          </div>
+        </article>
+      }
+    </div>
+  }
+
+  <!-- PAGINATION BAR -->
+  <div class="flex items-center justify-between pt-3 border-t border-dark-700 text-xs text-slate-400">
+    <span>Показано {{ articles().length > 0 ? articlesOffset() + 1 : 0 }}–{{ articlesOffset() + articles().length }} из {{ articlesTotal() }}</span>
+    <div class="space-x-2">
+      <button
+        (click)="prevPage.emit()"
+        [disabled]="articlesOffset() === 0"
+        class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 disabled:opacity-40">
+        ← Назад
+      </button>
+      <button
+        (click)="nextPage.emit()"
+        [disabled]="articlesOffset() + articlesLimit() >= articlesTotal()"
+        class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 disabled:opacity-40">
+        Вперёд →
+      </button>
+    </div>
+  </div>
+</div>

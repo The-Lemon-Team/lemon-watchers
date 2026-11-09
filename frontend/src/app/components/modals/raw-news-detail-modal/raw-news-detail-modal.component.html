@@ -1,0 +1,96 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (close)="close.emit()"
+  maxWidth="max-w-2xl"
+  panelClass="p-6 space-y-4"
+>
+  @if (item(); as item) {
+    <div class="flex items-center justify-between border-b border-dark-750 pb-3">
+      <div class="flex items-center space-x-2">
+        <span class="text-xl">📦</span>
+        <div>
+          <h3 class="text-base font-bold text-white">Сырая публикация (Raw News)</h3>
+          <p class="text-xs text-slate-400">Источник: {{ item.watcherTitle || item.watcherId }}</p>
+        </div>
+      </div>
+      <button (click)="close.emit()" class="text-slate-400 hover:text-white" aria-label="Закрыть">✕</button>
+    </div>
+
+    <div class="space-y-3 text-xs">
+      <div>
+        <label class="block text-slate-400 mb-0.5 font-medium">Заголовок</label>
+        <div class="text-white font-bold text-sm bg-dark-800 p-2.5 rounded-lg border border-dark-700">
+          {{ item.title }}
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-slate-400 mb-0.5 font-medium">Статус конвертации</label>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border"
+            [ngClass]="getRawStatusBadgeClass(item.status)">
+            {{ item.status }}
+          </span>
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-0.5 font-medium">Дата публикации</label>
+          <div class="text-slate-300 font-mono">{{ formatDate(item.pubDate) }}</div>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-slate-400 mb-0.5 font-medium">URL источника</label>
+        <a [href]="item.url" target="_blank" rel="noopener noreferrer"
+          class="text-lemon-400 hover:underline break-all block bg-dark-800 p-2 rounded border border-dark-700">
+          {{ item.url }} ↗
+        </a>
+      </div>
+
+      @if (item.description) {
+        <div>
+          <label class="block text-slate-400 mb-0.5 font-medium">Описание / Аннотация</label>
+          <div class="bg-dark-800 p-3 rounded-lg border border-dark-700 text-slate-300 max-h-48 overflow-y-auto leading-relaxed">
+            {{ item.description }}
+          </div>
+        </div>
+      }
+
+      @if (item.contentRaw) {
+        <div>
+          <label class="block text-slate-400 mb-0.5 font-medium">Полный сырой контент (HTML / Text)</label>
+          <div class="bg-dark-900 p-3 rounded-lg border border-dark-700 text-slate-400 font-mono text-[11px] max-h-48 overflow-y-auto whitespace-pre-wrap">
+            {{ item.contentRaw }}
+          </div>
+        </div>
+      }
+
+      <div class="flex items-center justify-between pt-3 border-t border-dark-750">
+        <button
+          (click)="close.emit()"
+          class="px-4 py-2 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 text-xs font-medium transition">
+          Закрыть
+        </button>
+
+        @if (item.status === 'PENDING' || item.status === 'FAILED') {
+          <div class="flex items-center space-x-2">
+            <button
+              (click)="convertSingleRawItem.emit(item); close.emit()"
+              [disabled]="convertingRawIds().has(item.id)"
+              class="px-3.5 py-2 rounded-lg bg-lemon-500/20 hover:bg-lemon-500/30 text-lemon-400 border border-lemon-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow">
+              <span>✨</span>
+              <span>В Note</span>
+            </button>
+            <button
+              (click)="convertAndPublishSingleRawNews.emit(item); close.emit()"
+              [disabled]="convertingRawIds().has(item.id)"
+              class="px-4 py-2 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow"
+              title="Сгенерировать заметку с AI и сразу передать в шину LemonBus ➜ Lemon Seasons">
+              <span>🚀</span>
+              <span>В Note + LemonBus</span>
+            </button>
+          </div>
+        }
+      </div>
+    </div>
+  }
+</app-modal>

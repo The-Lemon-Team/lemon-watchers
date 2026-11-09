@@ -1,0 +1,228 @@
+<div class="space-y-4">
+  <!-- Header & Action controls -->
+  <div class="bg-dark-850 p-4 rounded-xl border border-dark-700/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <div class="flex items-center space-x-2">
+        <h2 class="text-base font-bold text-white flex items-center space-x-2">
+          <span>📦</span>
+          <span>Сырые собранные публикации (Stage 1 / lemon_raw_news)</span>
+        </h2>
+        <span class="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-mono">
+          {{ rawNewsTotal() }} записей
+        </span>
+      </div>
+      <p class="text-xs text-slate-400 mt-1">
+        Первичная выгрузка из RSS/Atom до обработки нейросетью. Накапливается автономно и конвертируется в готовые заметки
+      </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <!-- Filter by Status -->
+      <div class="flex items-center space-x-1 bg-dark-800 p-1 rounded-lg border border-dark-700 text-xs">
+        <button
+          (click)="rawNewsStatusFilterChange.emit('')"
+          class="px-2.5 py-1 rounded transition"
+          [ngClass]="rawNewsStatusFilter() === '' ? 'bg-lemon-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'">
+          Все
+        </button>
+        <button
+          (click)="rawNewsStatusFilterChange.emit('PENDING')"
+          class="px-2.5 py-1 rounded transition"
+          [ngClass]="rawNewsStatusFilter() === 'PENDING' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'">
+          Ожидают
+        </button>
+        <button
+          (click)="rawNewsStatusFilterChange.emit('CONVERTED')"
+          class="px-2.5 py-1 rounded transition"
+          [ngClass]="rawNewsStatusFilter() === 'CONVERTED' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'">
+          С конвертацией
+        </button>
+        <button
+          (click)="rawNewsStatusFilterChange.emit('FAILED')"
+          class="px-2.5 py-1 rounded transition"
+          [ngClass]="rawNewsStatusFilter() === 'FAILED' ? 'bg-rose-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'">
+          Ошибки
+        </button>
+      </div>
+
+      <!-- Process pending button -->
+      <button
+        (click)="processAllPendingRaw.emit()"
+        [disabled]="isProcessingAllPending()"
+        class="px-3 py-1.5 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow disabled:opacity-50">
+        <span>✨</span>
+        <span>{{ isProcessingAllPending() ? 'Запуск...' : 'Запустить AI конвертер' }}</span>
+      </button>
+
+      <button
+        (click)="loadRawNews.emit()"
+        class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 border border-dark-700 text-slate-300 text-xs transition">
+        🔄
+      </button>
+    </div>
+  </div>
+
+  <!-- Batch Action Banner for Raw News -->
+  @if (selectedRawNewsIds().size > 0) {
+    <div class="bg-gradient-to-r from-lemon-500/15 via-emerald-500/15 to-transparent border border-lemon-500/30 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+      <div class="flex items-center space-x-2">
+        <span class="px-2.5 py-1 rounded-full bg-lemon-500 text-slate-950 font-bold text-xs">
+          Выбрано: {{ selectedRawNewsIds().size }}
+        </span>
+        <span class="text-xs text-slate-300">
+          новостей для конвертации нейросетью и отправки
+        </span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button
+          (click)="convertSelectedRawNews.emit()"
+          [disabled]="isBatchActionRunning()"
+          class="px-3.5 py-1.5 rounded-lg bg-lemon-500/20 hover:bg-lemon-500/30 text-lemon-400 border border-lemon-500/30 text-xs font-bold transition flex items-center space-x-1.5 shadow disabled:opacity-50">
+          <span>✨</span>
+          <span>{{ isBatchActionRunning() ? 'Обработка...' : 'Сгенерировать заметки' }}</span>
+        </button>
+
+        <button
+          (click)="convertAndPublishSelectedRawNews.emit()"
+          [disabled]="isBatchActionRunning()"
+          class="px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition flex items-center space-x-1.5 shadow disabled:opacity-50"
+          title="Сгенерировать заметки с AI и сразу передать в шину LemonBus ➜ Lemon Seasons">
+          <span>🚀</span>
+          <span>{{ isBatchActionRunning() ? 'Обработка...' : 'Сгенерировать и отправить в LemonBus (➜ Seasons)' }}</span>
+        </button>
+
+        <button
+          (click)="clearSelectedRawNews.emit()"
+          class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-700 text-xs transition">
+          Снять выбор
+        </button>
+      </div>
+    </div>
+  }
+
+  <!-- Raw News Table -->
+  <div class="bg-dark-850 rounded-xl border border-dark-700/80 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs">
+        <thead class="bg-dark-800/80 text-slate-400 uppercase tracking-wider text-[11px] border-b border-dark-700/80">
+          <tr>
+            <th class="px-3 py-3 w-8 text-center">
+              <input
+                type="checkbox"
+                [checked]="isAllRawNewsSelected()"
+                (change)="toggleAllRawNewsSelect.emit()"
+                class="rounded bg-dark-900 border-dark-600 text-lemon-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                title="Выбрать все новости на текущей странице" />
+            </th>
+            <th class="px-4 py-3">Статус</th>
+            <th class="px-4 py-3">Заголовок / Ссылка</th>
+            <th class="px-4 py-3">Источник (Вотчер)</th>
+            <th class="px-4 py-3">Дата публикации</th>
+            <th class="px-4 py-3 text-right">Действия</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-dark-750">
+          @for (item of rawNewsItems(); track item.id) {
+            <tr class="hover:bg-dark-800/40 transition" [class.bg-dark-800/30]="selectedRawNewsIds().has(item.id)">
+              <td class="px-3 py-3 text-center whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  [checked]="selectedRawNewsIds().has(item.id)"
+                  (change)="toggleRawNewsSelect.emit(item.id)"
+                  class="rounded bg-dark-900 border-dark-600 text-lemon-500 focus:ring-0 focus:ring-offset-0 cursor-pointer" />
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border"
+                  [ngClass]="getRawStatusBadgeClass(item.status)">
+                  @switch (item.status) {
+                    @case ('PENDING') { ⏳ Ожидает }
+                    @case ('CONVERTING') { 🔄 Обработка }
+                    @case ('CONVERTED') { ✅ Готово }
+                    @case ('FAILED') { ❌ Сбой }
+                    @default { {{ item.status }} }
+                  }
+                </span>
+              </td>
+              <td class="px-4 py-3 max-w-md">
+                <div class="font-bold text-white hover:text-lemon-400 transition cursor-pointer"
+                  (click)="openRawDetail.emit(item)">
+                  {{ item.title }}
+                </div>
+                <div class="flex items-center space-x-2 mt-0.5">
+                  <a [href]="item.url" target="_blank" rel="noopener noreferrer"
+                    class="text-lemon-400/80 hover:text-lemon-300 text-[11px] truncate max-w-xs inline-flex items-center space-x-1">
+                    <span>{{ item.url }}</span>
+                    <span>↗</span>
+                  </a>
+                </div>
+                @if (item.error) {
+                  <div class="text-rose-400 text-[11px] mt-1 font-mono">
+                    Ошибка: {{ item.error }}
+                  </div>
+                }
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap">
+                <div class="text-slate-200 font-medium">{{ item.watcherTitle || item.watcherId }}</div>
+                <div class="text-slate-400 text-[11px]">{{ item.author || '—' }}</div>
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap text-slate-400 font-mono text-[11px]">
+                {{ formatDate(item.pubDate) }}
+              </td>
+              <td class="px-4 py-3 whitespace-nowrap text-right space-x-1.5">
+                <button
+                  (click)="openRawDetail.emit(item)"
+                  class="px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-700 text-slate-300 border border-dark-700 transition">
+                  Детали
+                </button>
+
+                @if (item.status === 'PENDING' || item.status === 'FAILED') {
+                  <button
+                    (click)="convertSingleRawItem.emit(item)"
+                    [disabled]="convertingRawIds().has(item.id)"
+                    class="px-2.5 py-1 rounded bg-lemon-500/20 hover:bg-lemon-500/30 text-lemon-400 border border-lemon-500/30 font-semibold transition disabled:opacity-50">
+                    {{ convertingRawIds().has(item.id) ? '...' : '✨ В Note' }}
+                  </button>
+
+                  <button
+                    (click)="convertAndPublishSingleRawNews.emit(item)"
+                    [disabled]="convertingRawIds().has(item.id)"
+                    class="px-2.5 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 font-semibold transition disabled:opacity-50"
+                    title="Сгенерировать заметку с AI и сразу отправить в шину LemonBus (➜ Lemon Seasons)">
+                    {{ convertingRawIds().has(item.id) ? '...' : '🚀 Note + Bus' }}
+                  </button>
+                }
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="6" class="py-12 text-center text-slate-500">
+                <span class="text-3xl block mb-2">📭</span>
+                <p class="text-sm font-medium">Нет сырых публикаций</p>
+                <p class="text-xs mt-1 text-slate-600">Публикации появятся здесь автоматически после первого опроса вотчеров</p>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div class="p-3 border-t border-dark-700 flex justify-between items-center text-xs text-slate-400">
+      <span>Показано {{ rawNewsItems().length > 0 ? rawNewsOffset() + 1 : 0 }}–{{ rawNewsOffset() + rawNewsItems().length }} из {{ rawNewsTotal() }}</span>
+      <div class="space-x-2">
+        <button
+          (click)="prevRawPage.emit()"
+          [disabled]="rawNewsOffset() === 0"
+          class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 disabled:opacity-40">
+          ← Назад
+        </button>
+        <button
+          (click)="nextRawPage.emit()"
+          [disabled]="rawNewsOffset() + rawNewsLimit() >= rawNewsTotal()"
+          class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 disabled:opacity-40">
+          Вперёд →
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

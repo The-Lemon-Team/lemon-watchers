@@ -1,0 +1,295 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (close)="close.emit()"
+  maxWidth="max-w-4xl"
+  panelClass="max-h-[92vh] flex flex-col overflow-hidden"
+>
+  @if (feed(); as feed) {
+    <!-- Header -->
+    <div class="p-5 border-b border-dark-700 bg-dark-850 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="space-y-1">
+        <div class="flex items-center space-x-2 text-xs">
+          @let fInfo = getFolderInfo(feed.category);
+          <span class="px-2 py-0.5 rounded-md font-semibold border bg-dark-750 text-slate-300 border-dark-700 text-[11px]">
+            {{ fInfo.icon }} {{ fInfo.title }}
+          </span>
+          <span class="px-2 py-0.5 rounded bg-dark-800 text-slate-400 font-mono text-[11px] border border-dark-700">
+            {{ feed.protocol | uppercase }}
+          </span>
+          <span class="text-slate-600">•</span>
+          <span class="font-mono text-xs text-slate-400 truncate max-w-xs">{{ feed.slug }}</span>
+        </div>
+        <h3 class="text-base sm:text-lg font-bold text-white">{{ feed.title }}</h3>
+        <p class="text-xs text-slate-400 font-mono truncate max-w-xl">{{ feed.url }}</p>
+      </div>
+
+      <div class="flex items-center space-x-2 self-end sm:self-center">
+        <!-- Mutex Switch in Modal Header -->
+        <div class="flex items-center space-x-2 mr-1 bg-dark-800 px-2.5 py-1.5 rounded-lg border border-dark-700">
+          <span class="text-xs text-slate-300 font-medium">Mutex:</span>
+          <button
+            (click)="toggleWatcher.emit({ watcher: feed, event: $event })"
+            class="w-8 h-4.5 rounded-full transition relative inline-block focus:outline-none"
+            [ngClass]="feed.enabled !== false ? 'bg-lemon-500' : 'bg-slate-700'"
+            [title]="feed.enabled !== false ? 'Mutex Guard активен (вотчер включен). Нажмите, чтобы приостановить' : 'Mutex Guard снят (вотчер на паузе). Нажмите, чтобы активировать'">
+            <span
+              class="w-3.5 h-3.5 rounded-full bg-white absolute top-0.5 transition-all"
+              [ngClass]="feed.enabled !== false ? 'right-0.5' : 'left-0.5'"></span>
+          </button>
+        </div>
+
+        <button
+          (click)="triggerWatcher.emit(feed)"
+          [disabled]="feed.enabled === false || pollingWatcherIds().has(feed.id)"
+          [title]="feed.enabled === false ? 'Вотчер на паузе. Включите Mutex Guard для запуска тика' : 'Запустить немедленный тик потока'"
+          class="px-3 py-1.5 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 font-bold text-xs transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed flex items-center space-x-1.5 shadow">
+          @if (pollingWatcherIds().has(feed.id)) {
+            <span>⏳ Опрос...</span>
+          } @else {
+            <span>⚡ Запустить тик</span>
+          }
+        </button>
+        <button (click)="close.emit()" class="text-slate-400 hover:text-white p-1 text-lg" aria-label="Закрыть">✕</button>
+      </div>
+    </div>
+
+    <!-- Reactive Flow Pipeline Banner -->
+    <div class="px-5 py-3 bg-dark-900 border-b border-dark-700/80">
+      <div class="flex items-center justify-between mb-1.5">
+        <span class="text-[11px] uppercase tracking-wider font-bold text-slate-400">Реактивный конвейер потока (Flow Pipeline)</span>
+        <span class="text-[11px] font-mono"
+          [ngClass]="feed.status === 'SUCCESS' ? 'text-emerald-400' : feed.status === 'POLLING' ? 'text-amber-400' : 'text-slate-400'">
+          Статус: {{ feed.status }}
+        </span>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-1.5 text-center text-[11px]">
+        <button
+          type="button"
+          (click)="toggleWatcher.emit({ watcher: feed, event: $event })"
+          class="p-1.5 rounded bg-dark-800 border transition cursor-pointer text-center focus:outline-none"
+          [ngClass]="feed.enabled !== false ? 'border-emerald-500/40 text-emerald-300 hover:border-emerald-400' : 'border-amber-500/30 text-slate-400 hover:border-amber-500/50'"
+          [title]="feed.enabled !== false ? 'Mutex Guard активен (кликните для отключения)' : 'Mutex Guard снят (кликните для активации)'">
+          <div class="font-bold flex items-center justify-center space-x-1">
+            <span>1. Mutex Guard</span>
+            <span class="text-[9px] px-1 rounded font-mono" [ngClass]="feed.enabled !== false ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'">
+              {{ feed.enabled !== false ? 'ON' : 'OFF' }}
+            </span>
+          </div>
+          <div class="text-[10px]" [ngClass]="feed.enabled !== false ? 'text-emerald-400/80' : 'text-slate-400'">
+            {{ feed.enabled !== false ? '🔒 Захвачен (ON)' : '🔓 Снят (PAUSED)' }}
+          </div>
+        </button>
+        <div class="p-1.5 rounded bg-dark-800 border border-dark-700/60 text-sky-300">
+          <div class="font-bold">2. Proxy Queue</div>
+          <div class="text-[10px] text-slate-400">Лимит: 2 conn</div>
+        </div>
+        <div class="p-1.5 rounded bg-dark-800 border border-dark-700/60 text-amber-300">
+          <div class="font-bold">3. HTTP ETag</div>
+          <div class="text-[10px] text-slate-400">Conditional GET</div>
+        </div>
+        <div class="p-1.5 rounded bg-dark-800 border border-dark-700/60 text-purple-300">
+          <div class="font-bold">4. Delta & AI</div>
+          <div class="text-[10px] text-slate-400">SHA-256 + Gemini</div>
+        </div>
+        <div class="p-1.5 rounded bg-dark-800 border border-dark-700/60 text-emerald-300 col-span-2 sm:col-span-1">
+          <div class="font-bold">5. DB & Bus</div>
+          <div class="text-[10px] text-slate-400">Postgres + SSE</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="flex border-b border-dark-700 bg-dark-850/60 px-5 pt-2 space-x-2 text-xs">
+      <button
+        (click)="tabChange.emit('history')"
+        class="pb-2.5 px-3 font-semibold border-b-2 transition flex items-center space-x-1.5"
+        [ngClass]="activeTab() === 'history' ? 'border-lemon-400 text-lemon-400' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>⚡</span>
+        <span>История потока (Flow Runs)</span>
+        <span class="px-1.5 py-0.2 rounded-full bg-dark-750 text-[10px] text-slate-300 font-mono">{{ pingHistory().length }}</span>
+      </button>
+
+      <button
+        (click)="tabChange.emit('articles')"
+        class="pb-2.5 px-3 font-semibold border-b-2 transition flex items-center space-x-1.5"
+        [ngClass]="activeTab() === 'articles' ? 'border-lemon-400 text-lemon-400' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>📰</span>
+        <span>Собранные статьи</span>
+        <span class="px-1.5 py-0.2 rounded-full bg-dark-750 text-[10px] text-slate-300 font-mono">{{ articlesTotal() }}</span>
+      </button>
+    </div>
+
+    <!-- Modal Body Content -->
+    <div class="p-5 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+      
+      <!-- TAB 1: FLOW RUNS & METRICS -->
+      @if (activeTab() === 'history') {
+        <!-- Quick Flow Metrics Cards -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+          <div class="p-3 rounded-xl bg-dark-800 border border-dark-700/60">
+            <div class="text-[11px] text-slate-400">Средняя задержка</div>
+            <div class="text-lg font-bold text-sky-400 mt-0.5 font-mono">{{ feedAvgLatency() }} ms</div>
+          </div>
+          <div class="p-3 rounded-xl bg-dark-800 border border-dark-700/60">
+            <div class="text-[11px] text-slate-400">Успешность (Success)</div>
+            <div class="text-lg font-bold text-emerald-400 mt-0.5 font-mono">{{ feedSuccessRate() }}%</div>
+          </div>
+          <div class="p-3 rounded-xl bg-dark-800 border border-dark-700/60">
+            <div class="text-[11px] text-slate-400">304 Not Modified</div>
+            <div class="text-lg font-bold text-blue-400 mt-0.5 font-mono">{{ feed304Count() }}</div>
+            <div class="text-[10px] text-slate-500">сэкономлено трафика</div>
+          </div>
+          <div class="p-3 rounded-xl bg-dark-800 border border-dark-700/60">
+            <div class="text-[11px] text-slate-400">Всего сеансов связи</div>
+            <div class="text-lg font-bold text-white mt-0.5 font-mono">{{ pingHistory().length }}</div>
+          </div>
+        </div>
+
+        <!-- History Table -->
+        <div class="bg-dark-800/60 rounded-xl border border-dark-700/60 overflow-hidden">
+          <div class="px-4 py-2.5 bg-dark-800 border-b border-dark-700 flex items-center justify-between">
+            <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Журнал тиков потока (Audit Log)</h4>
+            <span class="text-[11px] text-slate-400">Последние 50 записей</span>
+          </div>
+
+          @if (isHistoryLoading()) {
+            <div class="text-center py-12 text-slate-400">
+              <div class="text-xl animate-spin mb-1">⏳</div>
+              <div class="text-xs">Загрузка журнала сеансов...</div>
+            </div>
+          } @else {
+            <div class="overflow-x-auto">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-dark-850/80 text-slate-400 border-b border-dark-700 text-[11px]">
+                  <tr>
+                    <th class="py-2.5 px-3 font-medium">Время запуска</th>
+                    <th class="py-2.5 px-3 font-medium">Статус ответа</th>
+                    <th class="py-2.5 px-3 font-medium">Задержка (Latency)</th>
+                    <th class="py-2.5 px-3 font-medium">В ленте</th>
+                    <th class="py-2.5 px-3 font-medium">Новых дельт</th>
+                    <th class="py-2.5 px-3 font-medium">Результат / Ошибка</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-dark-750 font-mono text-[11px]">
+                  @for (ping of pingHistory(); track ping.id) {
+                    <tr class="hover:bg-dark-750/50 transition">
+                      <td class="py-2.5 px-3 text-slate-300 whitespace-nowrap">{{ formatDate(ping.createdAt) }}</td>
+                      <td class="py-2.5 px-3 whitespace-nowrap">
+                        <span class="px-2 py-0.5 rounded text-[11px] font-bold border"
+                          [ngClass]="ping.statusCode === 304 ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' :
+                            (ping.statusCode >= 200 && ping.statusCode < 400) ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                            'bg-red-500/15 text-red-400 border-red-500/30'">
+                          HTTP {{ ping.statusCode }}
+                        </span>
+                      </td>
+                      <td class="py-2.5 px-3 text-slate-200 whitespace-nowrap">
+                        <div class="flex items-center space-x-1.5">
+                          <span>{{ ping.latencyMs }} ms</span>
+                          <div class="w-12 bg-dark-900 rounded-full h-1.5 overflow-hidden hidden sm:block">
+                            <div
+                              class="h-full rounded-full"
+                              [ngClass]="ping.latencyMs < 500 ? 'bg-emerald-400' : ping.latencyMs < 1200 ? 'bg-amber-400' : 'bg-red-400'"
+                              [style.width.%]="Math.min(100, (ping.latencyMs / 1500) * 100)">
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="py-2.5 px-3 text-slate-300">{{ ping.itemsFound }}</td>
+                      <td class="py-2.5 px-3">
+                        @if (ping.newItemsCount > 0) {
+                          <span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                            +{{ ping.newItemsCount }} нов.
+                          </span>
+                        } @else {
+                          <span class="text-slate-500">0</span>
+                        }
+                      </td>
+                      <td class="py-2.5 px-3 font-sans truncate max-w-xs">
+                        @if (ping.error) {
+                          <span class="text-red-400" [title]="ping.error">⚠️ {{ ping.error }}</span>
+                        } @else if (ping.statusCode === 304) {
+                          <span class="text-blue-400">Изменений нет (Not Modified)</span>
+                        } @else {
+                          <span class="text-slate-400">Успешно синхронизировано</span>
+                        }
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr>
+                      <td colspan="6" class="text-center py-8 text-slate-500 font-sans">
+                        Журнал сеансов пуст. Нажмите «⚡ Запустить тик», чтобы выполнить первый опрос.
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </div>
+      }
+
+      <!-- TAB 2: ARTICLES LIST -->
+      @if (activeTab() === 'articles') {
+        @if (isArticlesLoading()) {
+          <div class="text-center py-16 text-slate-400">
+            <div class="text-2xl animate-spin mb-2">⏳</div>
+            <div>Загрузка статей из архива...</div>
+          </div>
+        } @else {
+          @for (article of articles(); track article.id) {
+            <div
+              (click)="openArticleModal.emit(article)"
+              class="p-4 rounded-xl bg-dark-800/80 hover:bg-dark-750/90 border border-dark-700/60 hover:border-lemon-500/40 transition cursor-pointer space-y-2 group">
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <span class="font-mono">{{ formatDate(article.publishedAt) }}</span>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-bold border"
+                  [ngClass]="getResonanceClass(article.resonanceScore)">
+                  ⚡ {{ article.resonanceScore }}/100
+                </span>
+              </div>
+
+              <h4 class="text-sm font-bold text-white group-hover:text-lemon-400 transition leading-snug">
+                {{ article.title }}
+              </h4>
+
+              @if (article.summary) {
+                <p class="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+                  {{ article.summary }}
+                </p>
+              }
+
+              <div class="flex items-center justify-between pt-1">
+                <div class="flex flex-wrap gap-1">
+                  @for (t of (article.tags || []).slice(0, 4); track t) {
+                    <span class="px-1.5 py-0.5 rounded bg-dark-900/60 text-slate-400 text-[10px]">#{{ t }}</span>
+                  }
+                </div>
+                <span class="text-xs text-lemon-400 font-medium group-hover:underline">Подробнее →</span>
+              </div>
+            </div>
+          } @empty {
+            <div class="text-center py-16 text-slate-400">
+              <div class="text-3xl mb-2">📭</div>
+              <div>Для данного фида пока нет сохраненных статей</div>
+            </div>
+          }
+        }
+      }
+
+    </div>
+
+    <!-- Footer -->
+    <div class="p-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between">
+      <div class="text-xs text-slate-400">
+        @if (activeTab() === 'articles') {
+          <span>Статей в архиве: <strong class="text-white">{{ articlesTotal() }}</strong></span>
+        } @else {
+          <span>Сеансов связи: <strong class="text-white">{{ pingHistory().length }}</strong></span>
+        }
+      </div>
+      <button (click)="close.emit()" class="px-4 py-1.5 rounded-lg bg-dark-750 hover:bg-dark-700 text-slate-200 text-xs font-semibold transition active:scale-95">
+        Закрыть
+      </button>
+    </div>
+  }
+</app-modal>
