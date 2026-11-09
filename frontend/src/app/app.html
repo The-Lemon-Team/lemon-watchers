@@ -1,0 +1,229 @@
+<div class="min-h-screen flex flex-col bg-dark-900 text-slate-100">
+
+  <!-- TOP HEADER -->
+  <app-header
+    [sseConnected]="sseConnected()"
+    [isTriggeringAll]="isTriggeringAll()"
+    [anyActiveWatchers]="anyActiveWatchers()"
+    [isPausingAll]="isPausingAll()"
+    (openCreateFolder)="openCreateFolder()"
+    (openCreateWatcher)="openCreateWatcher()"
+    (triggerAll)="triggerAllWatchers()"
+    (toggleAllCollection)="toggleAllCollection()"
+  />
+
+  <!-- METRICS BAR -->
+  <app-metrics-bar [metrics]="metrics()" />
+
+  <!-- NAVIGATION TABS -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-5 w-full">
+    <div class="flex border-b border-dark-700 space-x-6 text-sm font-medium overflow-x-auto custom-scrollbar">
+      <button
+        (click)="setTab('watchers')"
+        class="pb-3 flex items-center space-x-2 border-b-2 transition whitespace-nowrap"
+        [ngClass]="activeTab() === 'watchers' ? 'border-lemon-400 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>📡</span>
+        <span>Таблица вотчеров</span>
+        <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-dark-700 text-slate-300">{{ filteredWatchers().length }}</span>
+      </button>
+
+      <button
+        (click)="setTab('story')"
+        class="pb-3 flex items-center space-x-2 border-b-2 transition whitespace-nowrap"
+        [ngClass]="activeTab() === 'story' ? 'border-lemon-400 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>⚡</span>
+        <span>Хроника потоков (Whole Story)</span>
+        @if (storyEvents().length > 0) {
+          <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-lemon-500/20 text-lemon-400 border border-lemon-500/30">{{ storyEvents().length }}</span>
+        }
+      </button>
+
+      <button
+        (click)="setTab('raw-news')"
+        class="pb-3 flex items-center space-x-2 border-b-2 transition whitespace-nowrap"
+        [ngClass]="activeTab() === 'raw-news' ? 'border-lemon-400 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>📦</span>
+        <span>Сырые новости (Raw)</span>
+        <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-dark-700 text-slate-300">{{ rawNewsTotal() }}</span>
+      </button>
+
+      <button
+        (click)="setTab('articles')"
+        class="pb-3 flex items-center space-x-2 border-b-2 transition whitespace-nowrap"
+        [ngClass]="activeTab() === 'articles' ? 'border-lemon-400 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>📰</span>
+        <span>Собранные заметки</span>
+        <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-dark-700 text-slate-300">{{ articlesTotal() }}</span>
+      </button>
+
+      <button
+        (click)="setTab('pings')"
+        class="pb-3 flex items-center space-x-2 border-b-2 transition whitespace-nowrap"
+        [ngClass]="activeTab() === 'pings' ? 'border-lemon-400 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>📶</span>
+        <span>Телеметрия пингов</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- FOLDERS / CATEGORIES TABS BAR -->
+  <app-folder-tabs
+    [folders]="folders()"
+    [selectedFolderSlug]="selectedFolderSlug()"
+    [totalWatchersCount]="watchers().length"
+    (selectFolder)="selectFolder($event)"
+    (openCreateFolder)="openCreateFolder()"
+    (deleteFolder)="deleteFolder($event.folder, $event.event)"
+  />
+
+  <!-- MAIN VIEW CONTAINER -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex-1 w-full min-w-0 space-y-4">
+    @if (activeTab() === 'watchers') {
+      <app-watchers-table
+        [watchers]="filteredWatchers()"
+        [folderColorMap]="folderColorMap()"
+        [pollingWatcherIds]="pollingWatcherIds()"
+        [searchQuery]="searchQuery()"
+        (searchQueryChange)="onWatchersSearchChange($event)"
+        (triggerWatcher)="triggerWatcher($event)"
+        (toggleWatcher)="toggleWatcher($event.watcher, $event.event)"
+        (openEditWatcher)="openEditWatcher($event.watcher, $event.event)"
+        (openFeedArticles)="openFeedArticles($event.watcher, $event.event)"
+        (deleteWatcher)="deleteWatcher($event.watcher, $event.event)"
+      />
+    }
+
+    @if (activeTab() === 'articles') {
+      <app-articles-view
+        [articles]="articles()"
+        [articlesTotal]="articlesTotal()"
+        [articlesLimit]="articlesLimit()"
+        [articlesOffset]="articlesOffset()"
+        [articlesViewMode]="articlesViewMode()"
+        [searchQuery]="searchQuery()"
+        [selectedArticleIds]="selectedArticleIds()"
+        [busStatus]="busStatus()"
+        [publishingBusIds]="publishingBusIds()"
+        [isPublishingAllBus]="isPublishingAllBus()"
+        [isBatchActionRunning]="isBatchActionRunning()"
+        [folderColorMap]="folderColorMap()"
+        (articlesViewModeChange)="articlesViewMode.set($event)"
+        (searchQueryChange)="onArticlesSearchChange($event)"
+        (publishAllPendingToBus)="publishAllPendingToBus()"
+        (publishSelectedArticlesToBus)="publishSelectedArticlesToBus()"
+        (clearSelectedArticles)="clearSelectedArticles()"
+        (toggleArticleSelect)="toggleArticleSelect($event)"
+        (toggleAllArticlesSelect)="toggleAllArticlesSelect()"
+        (publishSingleToBus)="publishSingleToBus($event)"
+        (openArticleModal)="openArticleModal($event)"
+        (prevPage)="prevPage()"
+        (nextPage)="nextPage()"
+      />
+    }
+
+    @if (activeTab() === 'pings') {
+      <app-pings-telemetry
+        [livePings]="livePings()"
+        (clearLog)="livePings.set([])"
+      />
+    }
+
+    @if (activeTab() === 'story') {
+      <app-story-stream
+        [storyEvents]="storyEvents()"
+        [anyActiveWatchers]="anyActiveWatchers()"
+        [activeWatchersCount]="activeWatchersCount()"
+        [totalWatchersCount]="totalWatchersCount()"
+        [includeProxyLogs]="includeProxyLogs()"
+        [isStoryLoading]="isStoryLoading()"
+        (toggleProxyLogs)="toggleProxyLogs()"
+        (loadStory)="loadStory()"
+        (clearEvents)="storyEvents.set([])"
+      />
+    }
+
+    @if (activeTab() === 'raw-news') {
+      <app-raw-news-view
+        [rawNewsItems]="rawNewsItems()"
+        [rawNewsTotal]="rawNewsTotal()"
+        [rawNewsLimit]="rawNewsLimit()"
+        [rawNewsOffset]="rawNewsOffset()"
+        [rawNewsStatusFilter]="rawNewsStatusFilter()"
+        [isRawNewsLoading]="isRawNewsLoading()"
+        [convertingRawIds]="convertingRawIds()"
+        [isProcessingAllPending]="isProcessingAllPending()"
+        [selectedRawNewsIds]="selectedRawNewsIds()"
+        [isBatchActionRunning]="isBatchActionRunning()"
+        (rawNewsStatusFilterChange)="setRawNewsStatusFilter($event)"
+        (processAllPendingRaw)="processAllPendingRaw()"
+        (loadRawNews)="loadRawNews()"
+        (convertSelectedRawNews)="convertSelectedRawNews()"
+        (convertAndPublishSelectedRawNews)="convertAndPublishSelectedRawNews()"
+        (clearSelectedRawNews)="clearSelectedRawNews()"
+        (toggleAllRawNewsSelect)="toggleAllRawNewsSelect()"
+        (toggleRawNewsSelect)="toggleRawNewsSelect($event)"
+        (openRawDetail)="openRawDetail($event)"
+        (convertSingleRawItem)="convertSingleRawItem($event)"
+        (convertAndPublishSingleRawNews)="convertAndPublishSingleRawNews($event)"
+        (prevRawPage)="prevRawPage()"
+        (nextRawPage)="nextRawPage()"
+      />
+    }
+  </main>
+
+  <!-- MODALS -->
+  <app-folder-modal
+    [isOpen]="isCreateFolderOpen()"
+    (close)="closeCreateFolder()"
+    (save)="saveFolder($event)"
+  />
+
+  <app-watcher-modal
+    [isOpen]="isCreateWatcherOpen() || isEditWatcherOpen()"
+    [mode]="isEditWatcherOpen() ? 'edit' : 'create'"
+    [folders]="folders()"
+    [watcherToEdit]="watcherToEdit()"
+    [initialCategory]="selectedFolderSlug()"
+    [isValidatingUrl]="isValidatingUrl()"
+    [validationResult]="validationResult()"
+    (close)="closeWatcherModal()"
+    (save)="saveWatcherModal($event)"
+    (validateUrl)="validateUrl($event)"
+  />
+
+  <app-feed-details-modal
+    [isOpen]="isFeedArticlesOpen()"
+    [feed]="activeFeedWatcher()"
+    [activeTab]="feedModalTab()"
+    [pingHistory]="feedPingHistory()"
+    [articles]="feedArticles()"
+    [articlesTotal]="feedArticlesTotal()"
+    [isHistoryLoading]="isFeedHistoryLoading()"
+    [isArticlesLoading]="isFeedArticlesLoading()"
+    [pollingWatcherIds]="pollingWatcherIds()"
+    [folderColorMap]="folderColorMap()"
+    (close)="closeFeedArticles()"
+    (tabChange)="setFeedModalTab($event)"
+    (triggerWatcher)="triggerWatcher($event)"
+    (toggleWatcher)="toggleWatcher($event.watcher, $event.event)"
+    (openArticleModal)="openArticleModal($event)"
+  />
+
+  <app-article-detail-modal
+    [article]="selectedArticle()"
+    [publishingBusIds]="publishingBusIds()"
+    [folderColorMap]="folderColorMap()"
+    (close)="closeArticleModal()"
+    (publishSingleToBus)="publishSingleToBus($event)"
+  />
+
+  <app-raw-news-detail-modal
+    [isOpen]="isRawDetailOpen()"
+    [item]="selectedRawItem()"
+    [convertingRawIds]="convertingRawIds()"
+    (close)="closeRawDetail()"
+    (convertSingleRawItem)="convertSingleRawItem($event)"
+    (convertAndPublishSingleRawNews)="convertAndPublishSingleRawNews($event)"
+  />
+
+</div>
