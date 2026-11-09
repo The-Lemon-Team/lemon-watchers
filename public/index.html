@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🍋 Lemon Watchers — Автономный центр новостей</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            lemon: {
+              400: '#facc15',
+              500: '#eab308',
+              600: '#ca8a04',
+            },
+            dark: {
+              900: '#0b0f19',
+              850: '#111827',
+              800: '#1a2234',
+              700: '#26334d',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+    .pulse-live { animation: pulse-subtle 2s infinite; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #111827; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  </style>
+</head>
+<body class="bg-dark-900 text-slate-100 min-h-screen flex flex-col font-sans antialiased custom-scrollbar">
+
+  <!-- Header -->
+  <header class="border-b border-dark-700 bg-dark-850/90 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <span class="text-3xl">🍋</span>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="font-bold text-lg text-white tracking-wide">Lemon Watchers</h1>
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-lemon-500/20 text-lemon-400 border border-lemon-500/30">v1.0 Autonomous</span>
+          </div>
+          <p class="text-xs text-slate-400">Реактивный сборщик первоисточников &amp; AI-обогащение</p>
+        </div>
+      </div>
+
+      <!-- Live metrics pill & SSE state -->
+      <div class="flex items-center space-x-4">
+        <div id="sseStatus" class="flex items-center space-x-2 text-xs px-3 py-1.5 rounded-full bg-dark-800 border border-dark-700">
+          <span class="w-2 h-2 rounded-full bg-amber-400 pulse-live" id="sseDot"></span>
+          <span class="text-slate-300 font-medium" id="sseText">Подключение к SSE...</span>
+        </div>
+
+        <button id="triggerAllBtn" class="flex items-center space-x-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 transition active:scale-95 shadow">
+          <span>⚡</span>
+          <span>Опросить все</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Metrics Bar -->
+  <div class="bg-dark-800/60 border-b border-dark-700/60 py-3">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+      <div class="p-2 rounded-lg bg-dark-850 border border-dark-700/50">
+        <div class="text-xs text-slate-400">Активных вотчеров</div>
+        <div class="text-xl font-bold text-white mt-0.5" id="metricActiveWatchers">—</div>
+      </div>
+      <div class="p-2 rounded-lg bg-dark-850 border border-dark-700/50">
+        <div class="text-xs text-slate-400">Собрано статей</div>
+        <div class="text-xl font-bold text-lemon-400 mt-0.5" id="metricTotalIngested">—</div>
+      </div>
+      <div class="p-2 rounded-lg bg-dark-850 border border-dark-700/50">
+        <div class="text-xs text-slate-400">Всего пингов</div>
+        <div class="text-xl font-bold text-slate-200 mt-0.5" id="metricTotalPings">—</div>
+      </div>
+      <div class="p-2 rounded-lg bg-dark-850 border border-dark-700/50">
+        <div class="text-xs text-slate-400">Средняя задержка</div>
+        <div class="text-xl font-bold text-emerald-400 mt-0.5" id="metricLatency">—</div>
+      </div>
+      <div class="p-2 rounded-lg bg-dark-850 border border-dark-700/50 col-span-2 sm:col-span-1">
+        <div class="text-xs text-slate-400">Success Rate</div>
+        <div class="text-xl font-bold text-cyan-400 mt-0.5" id="metricSuccessRate">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navigation Tabs -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+    <div class="flex border-b border-dark-700 space-x-6">
+      <button id="tabFeedBtn" class="tab-btn pb-3 text-sm font-semibold border-b-2 border-lemon-400 text-lemon-400 flex items-center space-x-2">
+        <span>📰</span>
+        <span>Живая лента статей</span>
+        <span id="articlesCountBadge" class="ml-1 text-xs px-2 py-0.5 rounded-full bg-dark-700 text-slate-300">0</span>
+      </button>
+      <button id="tabWatchersBtn" class="tab-btn pb-3 text-sm font-medium text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center space-x-2">
+        <span>📡</span>
+        <span>Вотчеры и источники</span>
+        <span id="watchersCountBadge" class="ml-1 text-xs px-2 py-0.5 rounded-full bg-dark-700 text-slate-400">0</span>
+      </button>
+      <button id="tabPingsBtn" class="tab-btn pb-3 text-sm font-medium text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center space-x-2">
+        <span>⚡</span>
+        <span>Журнал пингов (Live)</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Content Area -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
+
+    <!-- 1. FEED TAB -->
+    <div id="tabFeedContent" class="space-y-4">
+      <!-- Filters and Search -->
+      <div class="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <!-- Category chips -->
+        <div class="flex items-center space-x-1.5 overflow-x-auto py-1 custom-scrollbar text-xs" id="categoryChips">
+          <button class="cat-chip px-3 py-1.5 rounded-lg bg-lemon-500 text-slate-950 font-semibold" data-category="">Все категории</button>
+          <button class="cat-chip px-3 py-1.5 rounded-lg bg-dark-800 text-slate-300 hover:bg-dark-700 font-medium border border-dark-700" data-category="ai">🤖 AI &amp; Нейросети</button>
+          <button class="cat-chip px-3 py-1.5 rounded-lg bg-dark-800 text-slate-300 hover:bg-dark-700 font-medium border border-dark-700" data-category="cybersec">🛡️ Кибербезопасность</button>
+          <button class="cat-chip px-3 py-1.5 rounded-lg bg-dark-800 text-slate-300 hover:bg-dark-700 font-medium border border-dark-700" data-category="habr">💻 Хабр &amp; IT</button>
+          <button class="cat-chip px-3 py-1.5 rounded-lg bg-dark-800 text-slate-300 hover:bg-dark-700 font-medium border border-dark-700" data-category="politics">🌍 Политика &amp; Мир</button>
+          <button class="cat-chip px-3 py-1.5 rounded-lg bg-dark-800 text-slate-300 hover:bg-dark-700 font-medium border border-dark-700" data-category="frontier">🚀 Фронтир &amp; Tech</button>
+        </div>
+
+        <!-- Search Input -->
+        <div class="relative w-full sm:w-72">
+          <input type="text" id="searchInput" placeholder="Поиск по статьям..." class="w-full bg-dark-850 border border-dark-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-lemon-500 transition" />
+          <span class="absolute right-2.5 top-2 text-xs text-slate-500">🔍</span>
+        </div>
+      </div>
+
+      <!-- Articles list container -->
+      <div id="articlesList" class="space-y-3">
+        <div class="text-center py-16 text-slate-400">
+          <div class="text-3xl mb-2">⏳</div>
+          <div class="text-sm">Загрузка собранных статей...</div>
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div class="flex items-center justify-between pt-4 border-t border-dark-700 text-xs text-slate-400" id="paginationBar">
+        <span id="pageInfo">Показано 0 из 0</span>
+        <div class="space-x-2">
+          <button id="prevPageBtn" class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 disabled:opacity-40" disabled>← Назад</button>
+          <button id="nextPageBtn" class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-dark-700 text-slate-300 disabled:opacity-40" disabled>Вперёд →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. WATCHERS TAB -->
+    <div id="tabWatchersContent" class="hidden space-y-4">
+      <div class="flex justify-between items-center">
+        <div>
+          <h2 class="text-base font-bold text-white">Автономные узлы сбора (Watchers)</h2>
+          <p class="text-xs text-slate-400">Индивидуальные RxJS потоки с поддержкой Conditional GET (ETag/304)</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="watchersGrid">
+        <div class="text-center py-16 text-slate-400 col-span-full">Загрузка каталога вотчеров...</div>
+      </div>
+    </div>
+
+    <!-- 3. PINGS LIVE LOG TAB -->
+    <div id="tabPingsContent" class="hidden space-y-3">
+      <div class="flex justify-between items-center">
+        <div>
+          <h2 class="text-base font-bold text-white">Живой поток сетевых пингов</h2>
+          <p class="text-xs text-slate-400">События поступают в реальном времени по SSE (`/api/v1/watchers/live`)</p>
+        </div>
+        <button id="clearPingsBtn" class="text-xs px-2.5 py-1 rounded bg-dark-800 hover:bg-dark-700 text-slate-400 hover:text-slate-200">Очистить лог</button>
+      </div>
+
+      <div class="bg-dark-850 rounded-xl border border-dark-700/80 p-3 font-mono text-xs overflow-hidden">
+        <div class="space-y-1.5 max-h-[500px] overflow-y-auto custom-scrollbar" id="pingsLog">
+          <div class="text-slate-500 py-4 text-center">Ожидание пингов...</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer class="border-t border-dark-800 py-4 text-center text-xs text-slate-500">
+    Lemon Watchers Engine • Автономный сборщик без привязки к внешним схемам
+  </footer>
+
+  <!-- SCRIPT LOGIC -->
+  <script>
+    const state = {
+      activeTab: 'feed',
+      category: '',
+      search: '',
+      offset: 0,
+      limit: 15,
+      totalArticles: 0,
+      watchers: [],
+      pings: []
+    };
+
+    // Category mappings
+    const CAT_LABELS = {
+      ai: { name: 'AI & Нейросети', badge: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30' },
+      cybersec: { name: 'Кибербезопасность', badge: 'bg-red-500/15 text-red-400 border-red-500/30' },
+      habr: { name: 'Хабр & IT', badge: 'bg-sky-500/15 text-sky-400 border-sky-500/30' },
+      politics: { name: 'Политика & Мир', badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
+      frontier: { name: 'Фронтир & Tech', badge: 'bg-purple-500/15 text-purple-400 border-purple-500/30' }
+    };
+
+    // Helper: format dates
+    function formatDate(isoStr) {
+      if (!isoStr) return '—';
+      const d = new Date(isoStr);
+      return d.toLocaleString('ru-RU', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    // Tabs navigation
+    const tabBtns = {
+      feed: document.getElementById('tabFeedBtn'),
+      watchers: document.getElementById('tabWatchersBtn'),
+      pings: document.getElementById('tabPingsBtn')
+    };
+    const tabContents = {
+      feed: document.getElementById('tabFeedContent'),
+      watchers: document.getElementById('tabWatchersContent'),
+      pings: document.getElementById('tabPingsContent')
+    };
+
+    function switchTab(target) {
+      state.activeTab = target;
+      Object.keys(tabBtns).forEach(tab => {
+        const btn = tabBtns[tab];
+        const content = tabContents[tab];
+        if (tab === target) {
+          btn.className = 'tab-btn pb-3 text-sm font-semibold border-b-2 border-lemon-400 text-lemon-400 flex items-center space-x-2';
+          content.classList.remove('hidden');
+        } else {
+          btn.className = 'tab-btn pb-3 text-sm font-medium text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center space-x-2';
+          content.classList.add('hidden');
+        }
+      });
+      if (target === 'watchers') loadWatchers();
+      if (target === 'feed') loadArticles();
+    }
+
+    tabBtns.feed.addEventListener('click', () => switchTab('feed'));
+    tabBtns.watchers.addEventListener('click', () => switchTab('watchers'));
+    tabBtns.pings.addEventListener('click', () => switchTab('pings'));
+
+    // Category chips
+    document.querySelectorAll('.cat-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.cat-chip').forEach(b => {
+          b.className = 'cat-chip px-3 py-1.5 rounded-lg bg-dark-800 text-slate-300 hover:bg-dark-700 font-medium border border-dark-700';
+        });
+        btn.className = 'cat-chip px-3 py-1.5 rounded-lg bg-lemon-500 text-slate-950 font-semibold';
+        state.category = btn.getAttribute('data-category') || '';
+        state.offset = 0;
+        loadArticles();
+      });
+    });
+
+    // Search debounce
+    let searchTimeout = null;
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        state.search = e.target.value.trim();
+        state.offset = 0;
+        loadArticles();
+      }, 350);
+    });
+
+    // Pagination buttons
+    document.getElementById('prevPageBtn').addEventListener('click', () => {
+      if (state.offset > 0) {
+        state.offset = Math.max(0, state.offset - state.limit);
+        loadArticles();
+      }
+    });
+
+    document.getElementById('nextPageBtn').addEventListener('click', () => {
+      if (state.offset + state.limit < state.totalArticles) {
+        state.offset += state.limit;
+        loadArticles();
+      }
+    });
+
+    // Trigger All Button
+    document.getElementById('triggerAllBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('triggerAllBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span><span>Опрос запущен...</span>';
+      try {
+        await fetch('/api/v1/watchers/trigger-all', { method: 'POST' });
+        setTimeout(loadMetrics, 1500);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.innerHTML = '<span>⚡</span><span>Опросить все</span>';
+        }, 2000);
+      }
+    });
+
+    // Clear pings log
+    document.getElementById('clearPingsBtn').addEventListener('click', () => {
+      state.pings = [];
+      document.getElementById('pingsLog').innerHTML = '<div class="text-slate-500 py-4 text-center">Ожидание пингов...</div>';
+    });
+
+    // Fetch Metrics
+    async function loadMetrics() {
+      try {
+        const res = await fetch('/api/v1/metrics');
+        if (!res.ok) return;
+        const data = await res.json();
+        document.getElementById('metricActiveWatchers').textContent = `${data.activeWatchers} / ${data.totalWatchers}`;
+        document.getElementById('metricTotalIngested').textContent = data.totalNotesIngested.toLocaleString();
+        document.getElementById('metricTotalPings').textContent = data.totalPings.toLocaleString();
+        document.getElementById('metricLatency').textContent = `${data.avgLatencyMs} мс`;
+        document.getElementById('metricSuccessRate').textContent = `${data.successRatePercent}%`;
+        document.getElementById('watchersCountBadge').textContent = data.totalWatchers;
+      } catch (e) {
+        console.warn('Metrics load error:', e);
+      }
+    }
+
+    // Fetch Articles
+    async function loadArticles() {
+      const container = document.getElementById('articlesList');
+      const params = new URLSearchParams({
+        limit: state.limit,
+        offset: state.offset
+      });
+      if (state.category) params.set('category', state.category);
+      if (state.search) params.set('search', state.search);
+
+      try {
+        const res = await fetch(`/api/v1/items?${params.toString()}`);
+        const data = await res.json();
+        state.totalArticles = data.total;
+
+        document.getElementById('articlesCountBadge').textContent = data.total.toLocaleString();
+        document.getElementById('pageInfo').textContent = `Показано ${data.items.length > 0 ? state.offset + 1 : 0}–${state.offset + data.items.length} из ${data.total}`;
+        document.getElementById('prevPageBtn').disabled = state.offset === 0;
+        document.getElementById('nextPageBtn').disabled = state.offset + state.limit >= data.total;
+
+        if (data.items.length === 0) {
+          container.innerHTML = `
+            <div class="text-center py-16 text-slate-400 bg-dark-850 rounded-xl border border-dark-700/60">
+              <div class="text-3xl mb-2">📭</div>
+              <div class="text-sm font-medium">Статей пока нет</div>
+              <div class="text-xs text-slate-500 mt-1">Запустите опрос источников или смените фильтр</div>
+            </div>`;
+          return;
+        }
+
+        container.innerHTML = data.items.map(item => {
+          const catInfo = CAT_LABELS[item.category] || { name: item.category || 'Общее', badge: 'bg-slate-700 text-slate-300' };
+          const tags = Array.isArray(item.tags) ? item.tags : [];
+          const resonanceColor = item.resonanceScore >= 75 ? 'text-amber-400 bg-amber-400/10 border-amber-400/30' : 'text-slate-400 bg-dark-800 border-dark-700';
+
+          return `
+            <article class="p-4 rounded-xl bg-dark-850 border border-dark-700/80 hover:border-dark-700 transition space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <div class="flex items-center space-x-2">
+                  <span class="px-2 py-0.5 rounded-md font-semibold border ${catInfo.badge}">${catInfo.name}</span>
+                  <span class="text-slate-400 font-medium">${escapeHtml(item.watcherTitle || item.watcherSlug || 'Источник')}</span>
+                  <span class="text-slate-600">•</span>
+                  <span class="text-slate-400">${formatDate(item.publishedAt)}</span>
+                </div>
+                <div class="flex items-center space-x-1.5 px-2 py-0.5 rounded-full border text-[11px] font-mono ${resonanceColor}" title="Оценка резонанса">
+                  <span>⚡</span>
+                  <span>${item.resonanceScore}</span>
+                </div>
+              </div>
+
+              <h3 class="text-sm sm:text-base font-bold text-white hover:text-lemon-400 transition">
+                <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title || 'Без названия')}</a>
+              </h3>
+
+              ${item.summary ? `<p class="text-xs sm:text-sm text-slate-300 leading-relaxed">${escapeHtml(item.summary)}</p>` : ''}
+
+              <div class="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-dark-800 text-xs">
+                <div class="flex flex-wrap gap-1.5">
+                  ${tags.map(t => `<span class="px-2 py-0.5 rounded bg-dark-800 text-slate-400 border border-dark-700/60 text-[11px]">#${escapeHtml(t)}</span>`).join('')}
+                </div>
+                <div class="flex items-center space-x-3 text-slate-400">
+                  ${item.author ? `<span>✍️ ${escapeHtml(item.author)}</span>` : ''}
+                  <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="text-lemon-400 hover:underline flex items-center space-x-1">
+                    <span>Открыть оригинал</span>
+                    <span>↗</span>
+                  </a>
+                </div>
+              </div>
+            </article>
+          `;
+        }).join('');
+      } catch (err) {
+        container.innerHTML = `<div class="text-red-400 text-xs text-center py-8">Ошибка загрузки статей: ${err.message}</div>`;
+      }
+    }
+
+    // Fetch Watchers
+    async function loadWatchers() {
+      const grid = document.getElementById('watchersGrid');
+      try {
+        const res = await fetch('/api/v1/watchers');
+        const data = await res.json();
+        state.watchers = data.items || [];
+
+        if (state.watchers.length === 0) {
+          grid.innerHTML = '<div class="col-span-full text-center text-slate-400 py-12">Вотчеры не настроены</div>';
+          return;
+        }
+
+        grid.innerHTML = state.watchers.map(w => {
+          const statusColors = {
+            SUCCESS: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+            POLLING: 'bg-amber-500/15 text-amber-400 border-amber-500/30 pulse-live',
+            ERROR: 'bg-red-500/15 text-red-400 border-red-500/30',
+            IDLE: 'bg-slate-700/30 text-slate-400 border-slate-600'
+          };
+          const badgeClass = statusColors[w.status] || statusColors.IDLE;
+          const catInfo = CAT_LABELS[w.category] || { name: w.category };
+
+          return `
+            <div class="p-4 rounded-xl bg-dark-850 border border-dark-700/80 space-y-3 flex flex-col justify-between" id="watcher-card-${w.id}">
+              <div>
+                <div class="flex items-center justify-between text-xs mb-1.5">
+                  <span class="text-[11px] text-slate-400 font-medium">${catInfo.name}</span>
+                  <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold border ${badgeClass}" id="status-badge-${w.id}">${w.status}</span>
+                </div>
+                <h4 class="font-bold text-white text-sm leading-snug">${escapeHtml(w.title)}</h4>
+                <div class="text-xs text-slate-400 font-mono mt-1 break-all">${escapeHtml(w.slug)}</div>
+              </div>
+
+              <div class="space-y-1 text-xs text-slate-400 bg-dark-800/60 p-2.5 rounded-lg border border-dark-700/40 font-mono">
+                <div class="flex justify-between">
+                  <span>Последний пинг:</span>
+                  <span class="text-slate-200" id="last-ping-${w.id}">${formatDate(w.lastPingAt)}</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Задержка:</span>
+                  <span class="text-emerald-400" id="latency-${w.id}">${w.lastLatencyMs || 0} мс</span>
+                </div>
+                <div class="flex justify-between">
+                  <span>Собрано:</span>
+                  <span class="text-lemon-400" id="items-${w.id}">${w.totalItemsIngested || 0}</span>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-1">
+                <span class="text-[11px] text-slate-500">Пингов: ${w.totalPings || 0}</span>
+                <button onclick="triggerWatcher('${w.id}')" class="px-2.5 py-1 text-xs rounded-lg bg-dark-800 hover:bg-lemon-500 hover:text-slate-950 text-slate-300 border border-dark-700 font-semibold transition active:scale-95">
+                  ⚡ Опросить
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        grid.innerHTML = `<div class="col-span-full text-red-400 text-xs text-center">Ошибка: ${err.message}</div>`;
+      }
+    }
+
+    // Trigger Single Watcher
+    window.triggerWatcher = async function(id) {
+      try {
+        const badge = document.getElementById(`status-badge-${id}`);
+        if (badge) {
+          badge.className = 'px-2 py-0.5 rounded-full text-[11px] font-semibold border bg-amber-500/15 text-amber-400 border-amber-500/30 pulse-live';
+          badge.textContent = 'POLLING';
+        }
+        await fetch(`/api/v1/watchers/${id}/trigger`, { method: 'POST' });
+        setTimeout(() => {
+          loadMetrics();
+          if (state.activeTab === 'watchers') loadWatchers();
+        }, 1200);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
+    // SSE Connection setup
+    function setupSSE() {
+      const sseStatus = document.getElementById('sseStatus');
+      const sseDot = document.getElementById('sseDot');
+      const sseText = document.getElementById('sseText');
+
+      const es = new EventSource('/api/v1/watchers/live');
+
+      es.onopen = () => {
+        sseDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        sseText.textContent = 'Live SSE подключен';
+      };
+
+      es.onerror = () => {
+        sseDot.className = 'w-2 h-2 rounded-full bg-red-400 pulse-live';
+        sseText.textContent = 'Переподключение SSE...';
+      };
+
+      // Handle Ping events
+      es.addEventListener('ping', (e) => {
+        const ping = JSON.parse(e.data);
+        logPing(ping);
+        loadMetrics();
+
+        // Update single watcher card if present
+        const latEl = document.getElementById(`latency-${ping.watcherId}`);
+        if (latEl) latEl.textContent = `${ping.latencyMs} мс`;
+        const lastEl = document.getElementById(`last-ping-${ping.watcherId}`);
+        if (lastEl) lastEl.textContent = formatDate(ping.createdAt);
+      });
+
+      // Handle Article events
+      es.addEventListener('article', (e) => {
+        const article = JSON.parse(e.data);
+        loadMetrics();
+        if (state.activeTab === 'feed' && state.offset === 0) {
+          loadArticles();
+        }
+      });
+
+      // Handle Note events (alias)
+      es.addEventListener('note', (e) => {
+        loadMetrics();
+      });
+    }
+
+    function logPing(ping) {
+      const log = document.getElementById('pingsLog');
+      const isOk = ping.statusCode >= 200 && ping.statusCode < 400;
+      const statusColor = ping.statusCode === 304 ? 'text-blue-400' : isOk ? 'text-emerald-400' : 'text-red-400';
+
+      const entry = document.createElement('div');
+      entry.className = 'flex items-center justify-between py-1 border-b border-dark-800 text-[11px]';
+      entry.innerHTML = `
+        <div class="flex items-center space-x-2">
+          <span class="text-slate-500">${formatDate(ping.createdAt)}</span>
+          <span class="font-bold text-slate-300">${escapeHtml(ping.watcherId)}</span>
+        </div>
+        <div class="flex items-center space-x-3">
+          <span class="${statusColor}">HTTP ${ping.statusCode}</span>
+          <span class="text-slate-400">${ping.latencyMs}ms</span>
+          <span class="text-lemon-400">+${ping.newItemsCount || 0} нов.</span>
+        </div>
+      `;
+
+      if (log.children.length === 1 && log.children[0].textContent.includes('Ожидание')) {
+        log.innerHTML = '';
+      }
+      log.insertBefore(entry, log.firstChild);
+      if (log.children.length > 50) {
+        log.removeChild(log.lastChild);
+      }
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Initial boot
+    loadMetrics();
+    loadArticles();
+    setupSSE();
+  </script>
+</body>
+</html>
