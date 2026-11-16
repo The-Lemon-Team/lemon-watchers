@@ -1,7 +1,8 @@
-import { Subject, Subscription, concatMap, from } from 'rxjs';
+﻿import { Subject, Subscription, concatMap, from } from 'rxjs';
 import { DatabaseService } from '../db/database.service.js';
 import { GeminiSparkAxon } from './gemini-spark.axon.js';
 import { BusRelayAxon } from './bus-relay.axon.js';
+import { MediaCoverAxon } from './media-cover.axon.js';
 import { RawNewsItem } from '../types/raw-news.types.js';
 import { WatcherArticle } from '../types/article.types.js';
 import { StoryEvent } from '../types/story.types.js';
@@ -11,6 +12,7 @@ export interface NewsConverterQueueOptions {
   db: DatabaseService;
   gemini: GeminiSparkAxon;
   busRelay: BusRelayAxon;
+  mediaCover?: MediaCoverAxon;
   onArticleConverted?: (article: WatcherArticle) => void;
   onStoryEvent?: (event: StoryEvent) => void;
   getWatcherConfig?: (watcherId: string) => WatcherConfig | undefined;
@@ -20,6 +22,7 @@ export class NewsConverterQueueAxon {
   private readonly db: DatabaseService;
   private readonly gemini: GeminiSparkAxon;
   private readonly busRelay: BusRelayAxon;
+  private readonly mediaCover?: MediaCoverAxon;
   private readonly onArticleConverted?: (article: WatcherArticle) => void;
   private readonly onStoryEvent?: (event: StoryEvent) => void;
   private readonly getWatcherConfig?: (watcherId: string) => WatcherConfig | undefined;
@@ -33,6 +36,7 @@ export class NewsConverterQueueAxon {
     this.db = options.db;
     this.gemini = options.gemini;
     this.busRelay = options.busRelay;
+    this.mediaCover = options.mediaCover;
     this.onArticleConverted = options.onArticleConverted;
     this.onStoryEvent = options.onStoryEvent;
     this.getWatcherConfig = options.getWatcherConfig;
@@ -111,8 +115,22 @@ export class NewsConverterQueueAxon {
         enabled: true,
       };
 
-      // 1. Enrich with AI (Gemini) or canonical fallback
+      // 1. Enrich with AI (lemon-ai-service / Gemini) or canonical fallback
       const sparkNote = await this.gemini.enrichRawFeedItem(rawFeedItem, fallbackConfig);
+
+      // 1b. Resolve or generate cover image (best-effort)
+      const imgMatch = (item.contentRaw || '').match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/i);
+      const cover = this.mediaCover
+        ? await this.mediaCover.resolveArticleCover({
+            id: sparkNote.id,
+            title: sparkNote.title,
+            summary: sparkNote.summary,
+            category,
+            tags: sparkNote.tags,
+            coverPrompt: sparkNote.metadata?.coverPrompt,
+            externalImageUrl: imgMatch?.[1],
+          })
+        : null;
 
       // 2. Insert into lemon_watcher_items
       const article = await this.db.recordIngestedItem({
@@ -128,12 +146,25 @@ export class NewsConverterQueueAxon {
         resonanceScore: sparkNote.resonanceScore,
         contentHash: item.contentHash,
         publishedAt: sparkNote.eventDate || item.pubDate || new Date().toISOString(),
+        coverUrl: cover?.coverUrl || null,
+        coverThumbnailUrl: cover?.coverThumbnailUrl || null,
+        coverAssetId: cover?.coverAssetId || null,
         rawPayload: {
           guid: item.guid,
           categories: item.categories,
           feedSlug,
           watcherSlug,
           rawNewsId: item.id,
+          icon: sparkNote.icon,
+          coverPrompt: sparkNote.metadata?.coverPrompt,
+          coverUrl: cover?.coverUrl || null,
+          coverThumbnailUrl: cover?.coverThumbnailUrl || null,
+          coverAssetId: cover?.coverAssetId || null,
+          enrichedBy: sparkNote.metadata?.enrichedBy,
+          originalTitle: sparkNote.metadata?.originalTitle ?? item.title,
+          originalSummary: sparkNote.metadata?.originalSummary ?? item.description,
+          sourceLanguage: sparkNote.metadata?.sourceLanguage,
+          translationStatus: sparkNote.metadata?.translationStatus,
         },
         noteId: sparkNote.id,
       });
@@ -198,3 +229,4 @@ export class NewsConverterQueueAxon {
     }
   }
 }
+

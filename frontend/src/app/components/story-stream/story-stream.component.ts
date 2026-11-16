@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { StoryEvent } from '../../models';
-import { formatDate, getStoryBadgeClass } from '../../utils/formatters';
+import { formatDate, getStoryBadgeClass, highlightCounts } from '../../utils/formatters';
 
 @Component({
   selector: 'app-story-stream',
@@ -21,7 +21,17 @@ export class StoryStreamComponent {
   toggleProxyLogs = output<void>();
   loadStory = output<void>();
   clearEvents = output<void>();
+  selectEvent = output<StoryEvent>();
 
   formatDate = formatDate;
   getStoryBadgeClass = getStoryBadgeClass;
+  highlightCounts = highlightCounts;
+
+  getEventWatcherName(event: StoryEvent): string {
+    if (event.watcherTitle) return event.watcherTitle;
+    if (event.title.includes(':')) {
+      return event.title.split(':')[0].trim();
+    }
+    return event.title;
+  }
 }

@@ -20,6 +20,7 @@ import { CommonModule, DOCUMENT } from '@angular/common';
       <div
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade"
         [class]="backdropClass()"
+        [style.z-index]="zIndex"
         (mousedown)="onBackdropMouseDown($event)"
         (click)="onBackdropClick($event)"
         role="dialog"
@@ -50,11 +51,14 @@ export class ModalComponent implements OnDestroy {
 
   close = output<void>();
 
+  private static zCounter = 50;
+  zIndex = 50;
   private isMouseDownOnBackdrop = false;
 
   constructor() {
     effect(() => {
       if (this.isOpen()) {
+        this.zIndex = ++ModalComponent.zCounter;
         this.document.body.style.overflow = 'hidden';
       } else {
         this.document.body.style.overflow = '';

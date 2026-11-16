@@ -382,6 +382,61 @@ export class WatchersHttpServer {
       return;
     }
 
+    // Generate or regenerate article cover via AI + Media Hub (POST /api/v1/items/:id/generate-cover)
+    const generateCoverMatch = pathname.match(/^\/api\/v1\/items\/([^/]+)\/generate-cover$/);
+    if (generateCoverMatch && method === 'POST') {
+      const itemId = generateCoverMatch[1];
+      const body = await this.readJsonBody(req);
+      try {
+        const article = await this.engine.generateArticleCover(itemId, {
+          prompt: typeof body.prompt === 'string' ? body.prompt : undefined,
+          style: typeof body.style === 'string' ? body.style : undefined,
+          aspectRatio: typeof body.aspectRatio === 'string' ? (body.aspectRatio as any) : undefined,
+        });
+        if (!article) {
+          this.sendJson(res, 404, { error: `Item not found: ${itemId}` });
+          return;
+        }
+        this.sendJson(res, 200, { message: 'Cover generated via Media Hub', article });
+      } catch (err: any) {
+        this.sendJson(res, 502, { error: err?.message || 'Cover generation failed' });
+      }
+      return;
+    }
+
+    // AI content assistance for article (POST /api/v1/items/:id/ai-assist)
+    const aiAssistMatch = pathname.match(/^\/api\/v1\/items\/([^/]+)\/ai-assist$/);
+    if (aiAssistMatch && method === 'POST') {
+      const itemId = aiAssistMatch[1];
+      const body = await this.readJsonBody(req);
+      try {
+        const article = await this.engine.assistArticleContent(itemId, {
+          action: body.action || 'rewrite',
+          instruction: typeof body.instruction === 'string' ? body.instruction : undefined,
+        });
+        if (!article) {
+          this.sendJson(res, 404, { error: `Item not found: ${itemId}` });
+          return;
+        }
+        this.sendJson(res, 200, { message: 'Article content updated with AI assist', article });
+      } catch (err: any) {
+        this.sendJson(res, 502, { error: err?.message || 'AI assist failed' });
+      }
+      return;
+    }
+
+    // Translate selected old articles to Russian (POST /api/v1/items/translate)
+    if (pathname === '/api/v1/items/translate' && method === 'POST') {
+      const body = await this.readJsonBody(req);
+      const ids = Array.isArray(body.ids) ? body.ids : [];
+      const result = await this.engine.translateArticles(ids);
+      this.sendJson(res, 200, {
+        message: `Translated ${result.translated.length}, failed ${result.failed.length}`,
+        ...result,
+      });
+      return;
+    }
+
     // 7. Raw News API (GET /api/v1/raw-news)
     if (pathname === '/api/v1/raw-news' && method === 'GET') {
       const limit = parseInt(url.searchParams.get('limit') || '20', 10);

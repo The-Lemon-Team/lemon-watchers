@@ -15,5 +15,8 @@ export interface SparkNotePayload {
   tags: string[]; // Strictly without '#', never includes 'jmdaily'
   resonanceScore: number; // 0..100
   icon?: string;
+  coverUrl?: string | null;
+  coverThumbnailUrl?: string | null;
+  coverAssetId?: string | null;
   metadata: Record<string, any>;
 }

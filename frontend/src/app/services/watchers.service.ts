@@ -334,6 +334,27 @@ export class WatchersService {
     );
   }
 
+  // AI & Media Cover Actions
+  generateArticleCover(
+    id: string,
+    options?: { prompt?: string; style?: string; aspectRatio?: string }
+  ): Observable<{ message: string; article: WatcherArticle }> {
+    return this.http.post<{ message: string; article: WatcherArticle }>(
+      `${this.apiBase}/items/${id}/generate-cover`,
+      options || {}
+    );
+  }
+
+  assistArticleContent(
+    id: string,
+    options: { action: 'rewrite' | 'expand' | 'summarize' | 'custom'; instruction?: string }
+  ): Observable<{ message: string; article: WatcherArticle }> {
+    return this.http.post<{ message: string; article: WatcherArticle }>(
+      `${this.apiBase}/items/${id}/ai-assist`,
+      options
+    );
+  }
+
   // LemonBus Publishing & Bridge API
   publishArticleToBus(id: string): Observable<{ message: string; article: WatcherArticle }> {
     return this.http.post<{ message: string; article: WatcherArticle }>(

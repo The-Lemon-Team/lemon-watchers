@@ -1,0 +1,292 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (close)="close.emit()"
+  maxWidth="max-w-4xl"
+  panelClass="max-h-[92vh] flex flex-col overflow-hidden"
+>
+  @if (event(); as evt) {
+    <!-- Header -->
+    <div class="p-5 border-b border-dark-700 bg-dark-850 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div class="space-y-1">
+        <div class="flex items-center space-x-2 text-xs">
+          <!-- Type Badge -->
+          <span class="px-2 py-0.5 rounded-md font-semibold border text-[11px] flex items-center space-x-1"
+            [ngClass]="{
+              'bg-emerald-950/40 border-emerald-500/40 text-emerald-300': evt.type === 'NEWS_COLLECTED',
+              'bg-slate-800 border-slate-700 text-slate-300': evt.type === 'NO_UPDATES',
+              'bg-rose-950/40 border-rose-500/40 text-rose-300': evt.type === 'FLOW_ERROR',
+              'bg-cyan-950/40 border-cyan-500/40 text-cyan-300': evt.type === 'PROXY_LOG'
+            }">
+            <span>
+              @switch (evt.type) {
+                @case ('NEWS_COLLECTED') { 🟢 Новые публикации }
+                @case ('NO_UPDATES') { 💤 Проверка без дельт }
+                @case ('FLOW_ERROR') { ⚠️ Сбой соединения }
+                @case ('PROXY_LOG') { 🌐 Сетевой запрос }
+                @default { ℹ️ Событие хроники }
+              }
+            </span>
+          </span>
+
+          @if (watcher(); as w) {
+            @let fInfo = getFolderInfo(w.category);
+            <span class="px-2 py-0.5 rounded-md font-semibold border bg-dark-750 text-slate-300 border-dark-700 text-[11px]">
+              {{ fInfo.icon }} {{ fInfo.title }}
+            </span>
+            <span class="px-2 py-0.5 rounded bg-dark-800 text-slate-400 font-mono text-[11px] border border-dark-700">
+              {{ w.protocol | uppercase }}
+            </span>
+          }
+
+          <span class="text-slate-600">•</span>
+          <span class="font-mono text-xs text-slate-400">{{ formatDate(evt.timestamp) }}</span>
+        </div>
+
+        <h3 class="text-base sm:text-lg font-bold text-white leading-snug" [innerHTML]="highlightCounts(evt.title)">
+        </h3>
+
+        @if (watcher(); as w) {
+          <p class="text-xs text-slate-400 font-mono truncate max-w-xl">{{ w.url }}</p>
+        }
+      </div>
+
+      <div class="flex items-center space-x-2 self-end sm:self-center">
+        @if (watcher(); as w) {
+          <button
+            (click)="triggerWatcher.emit(w)"
+            class="px-3 py-1.5 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 font-bold text-xs transition active:scale-95 flex items-center space-x-1.5 shadow">
+            <span>⚡ Запустить тик</span>
+          </button>
+        }
+        <button (click)="close.emit()" class="text-slate-400 hover:text-white p-1 text-lg" aria-label="Закрыть">✕</button>
+      </div>
+    </div>
+
+    <!-- Quick Metrics Strip -->
+    <div class="px-5 py-3 bg-dark-900 border-b border-dark-700/80">
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+        <!-- New Items Count -->
+        <div class="p-2 rounded-lg bg-dark-800/80 border border-dark-700/60">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Сохранено новых</div>
+          <div class="font-mono text-base font-extrabold mt-0.5"
+            [ngClass]="(evt.newItemsCount || 0) > 0 ? 'text-emerald-400' : 'text-slate-400'">
+            +{{ evt.newItemsCount || 0 }}
+          </div>
+        </div>
+
+        <!-- Total Items in Feed -->
+        <div class="p-2 rounded-lg bg-dark-800/80 border border-dark-700/60">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Всего в ленте</div>
+          <div class="font-mono text-base font-bold text-amber-300 mt-0.5">
+            {{ evt.itemsCount !== undefined ? evt.itemsCount : '—' }}
+          </div>
+        </div>
+
+        <!-- HTTP Status -->
+        <div class="p-2 rounded-lg bg-dark-800/80 border border-dark-700/60">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">HTTP Статус</div>
+          <div class="font-mono text-base font-bold mt-0.5"
+            [ngClass]="evt.statusCode === 304 ? 'text-blue-400' : (evt.statusCode || 0) < 400 ? 'text-emerald-400' : 'text-rose-400'">
+            {{ evt.statusCode ? 'HTTP ' + evt.statusCode : '—' }}
+          </div>
+        </div>
+
+        <!-- Latency -->
+        <div class="p-2 rounded-lg bg-dark-800/80 border border-dark-700/60">
+          <div class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Задержка сети</div>
+          <div class="font-mono text-base font-semibold text-slate-200 mt-0.5">
+            {{ evt.latencyMs ? evt.latencyMs + 'ms' : '—' }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab Buttons -->
+    <div class="flex items-center space-x-1 px-5 border-b border-dark-700 bg-dark-850">
+      <button
+        (click)="setTab('articles')"
+        class="py-3 px-4 text-xs font-semibold border-b-2 transition flex items-center space-x-2"
+        [ngClass]="activeTab() === 'articles' ? 'border-lemon-500 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>📰 Превью добавленных новостей</span>
+        @if (articles().length > 0) {
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold bg-lemon-500/20 text-lemon-400 border border-lemon-500/30">
+            {{ articles().length }}
+          </span>
+        }
+      </button>
+
+      <button
+        (click)="setTab('history')"
+        class="py-3 px-4 text-xs font-semibold border-b-2 transition flex items-center space-x-2"
+        [ngClass]="activeTab() === 'history' ? 'border-lemon-500 text-lemon-400 font-bold' : 'border-transparent text-slate-400 hover:text-slate-200'">
+        <span>⏱️ История сеансов связи</span>
+        @if (pingHistory().length > 0) {
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono text-slate-400 bg-dark-700">
+            {{ pingHistory().length }}
+          </span>
+        }
+      </button>
+    </div>
+
+    <!-- Modal Content Body -->
+    <div class="p-5 overflow-y-auto custom-scrollbar flex-1 space-y-3">
+      <!-- TAB 1: ARTICLES PREVIEW -->
+      @if (activeTab() === 'articles') {
+        @if (isArticlesLoading()) {
+          <div class="text-center py-16 text-slate-400">
+            <div class="text-2xl animate-spin mb-2">⏳</div>
+            <div>Загрузка публикаций потока...</div>
+          </div>
+        } @else {
+          @for (article of articles(); track article.id) {
+            <div
+              class="p-4 rounded-xl bg-dark-800/80 hover:bg-dark-750/90 border border-dark-700/60 hover:border-lemon-500/40 transition space-y-2.5 group">
+              <!-- Top bar: Date, Author, Resonance -->
+              <div class="flex items-center justify-between text-xs text-slate-400">
+                <div class="flex items-center space-x-2">
+                  <span class="font-mono text-slate-400">{{ formatDate(article.publishedAt) }}</span>
+                  @if (article.author) {
+                    <span class="text-slate-600">•</span>
+                    <span class="text-slate-300 font-medium truncate max-w-xs">{{ article.author }}</span>
+                  }
+                </div>
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-bold border"
+                  [ngClass]="getResonanceClass(article.resonanceScore)">
+                  ⚡ {{ article.resonanceScore }}/100
+                </span>
+              </div>
+
+              <!-- Article Title -->
+              <h4
+                (click)="openArticle.emit(article)"
+                class="text-sm font-bold text-white group-hover:text-lemon-400 transition leading-snug cursor-pointer">
+                {{ article.title }}
+              </h4>
+
+              <!-- Article Summary Preview -->
+              @if (article.summary) {
+                <p class="text-xs text-slate-300 line-clamp-3 leading-relaxed">
+                  {{ article.summary }}
+                </p>
+              }
+
+              <!-- Tags and Actions -->
+              <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-dark-700/40">
+                <div class="flex flex-wrap gap-1">
+                  @for (t of (article.tags || []).slice(0, 5); track t) {
+                    <span class="px-1.5 py-0.5 rounded bg-dark-900/80 text-slate-400 text-[10px] font-mono">#{{ t }}</span>
+                  }
+                </div>
+
+                <div class="flex items-center space-x-3 text-xs">
+                  <a
+                    [href]="article.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    (click)="$event.stopPropagation()"
+                    class="text-slate-400 hover:text-slate-200 transition flex items-center space-x-1">
+                    <span>Первоисточник</span>
+                    <span class="text-[10px]">↗</span>
+                  </a>
+
+                  <button
+                    (click)="openArticle.emit(article)"
+                    class="text-lemon-400 hover:text-lemon-300 font-medium group-hover:underline flex items-center space-x-1">
+                    <span>Подробнее</span>
+                    <span>→</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          } @empty {
+            <div class="text-center py-16 text-slate-500">
+              <span class="text-3xl block mb-2">📭</span>
+              <p class="text-sm font-medium">Для данного источника пока нет сохраненных статей</p>
+              <p class="text-xs mt-1 text-slate-600">Они появятся после следующего сеанса связи с обнаружением новых публикаций</p>
+            </div>
+          }
+        }
+      }
+
+      <!-- TAB 2: PING HISTORY -->
+      @if (activeTab() === 'history') {
+        @if (isHistoryLoading()) {
+          <div class="text-center py-16 text-slate-400">
+            <div class="text-2xl animate-spin mb-2">⏳</div>
+            <div>Загрузка журнала сеансов связи...</div>
+          </div>
+        } @else {
+          <div class="overflow-x-auto rounded-lg border border-dark-700">
+            <table class="w-full text-left text-xs text-slate-300 font-mono">
+              <thead class="bg-dark-850 text-slate-400 uppercase text-[10px] tracking-wider border-b border-dark-700">
+                <tr>
+                  <th class="py-2.5 px-3">Сеанс связи</th>
+                  <th class="py-2.5 px-3">Код</th>
+                  <th class="py-2.5 px-3">Задержка</th>
+                  <th class="py-2.5 px-3">В ленте</th>
+                  <th class="py-2.5 px-3">Дельта</th>
+                  <th class="py-2.5 px-3">Результат</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-dark-700/60">
+                @for (ping of pingHistory(); track ping.id) {
+                  <tr class="hover:bg-dark-800/40 transition">
+                    <td class="py-2.5 px-3 text-slate-400">{{ formatDate(ping.createdAt) }}</td>
+                    <td class="py-2.5 px-3">
+                      <span class="px-1.5 py-0.5 rounded font-bold text-[10px]"
+                        [ngClass]="ping.statusCode === 304 ? 'bg-blue-500/20 text-blue-400' : ping.statusCode < 400 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'">
+                        {{ ping.statusCode }}
+                      </span>
+                    </td>
+                    <td class="py-2.5 px-3 text-slate-400">{{ ping.latencyMs }}ms</td>
+                    <td class="py-2.5 px-3 font-bold text-amber-300">{{ ping.itemsFound }}</td>
+                    <td class="py-2.5 px-3">
+                      @if (ping.newItemsCount > 0) {
+                        <span class="px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-300 font-extrabold border border-emerald-500/35">
+                          +{{ ping.newItemsCount }} нов.
+                        </span>
+                      } @else {
+                        <span class="text-slate-500">0</span>
+                      }
+                    </td>
+                    <td class="py-2.5 px-3 font-sans truncate max-w-xs">
+                      @if (ping.error) {
+                        <span class="text-red-400" [title]="ping.error">⚠️ {{ ping.error }}</span>
+                      } @else if (ping.statusCode === 304) {
+                        <span class="text-blue-400">Изменений нет (304 Not Modified)</span>
+                      } @else {
+                        <span class="text-slate-400">Успешно синхронизировано</span>
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="6" class="text-center py-8 text-slate-500 font-sans">
+                      Журнал сеансов пуст.
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
+    </div>
+
+    <!-- Footer -->
+    <div class="p-4 border-t border-dark-700 bg-dark-850 flex items-center justify-between">
+      <div class="text-xs text-slate-400">
+        @if (activeTab() === 'articles') {
+          <span>Статей в архиве источника: <strong class="text-white">{{ articlesTotal() }}</strong></span>
+        } @else {
+          <span>Сеансов в журнале: <strong class="text-white">{{ pingHistory().length }}</strong></span>
+        }
+      </div>
+      <button
+        (click)="close.emit()"
+        class="px-4 py-1.5 rounded-lg bg-dark-750 hover:bg-dark-700 text-slate-200 text-xs font-semibold transition active:scale-95">
+        Закрыть
+      </button>
+    </div>
+  }
+</app-modal>

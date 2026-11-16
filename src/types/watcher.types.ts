@@ -70,4 +70,5 @@ export interface RawFeedItem {
   pubDate: string; // ISO 8601 string
   author?: string;
   categories?: string[];
+  imageUrl?: string;
 }

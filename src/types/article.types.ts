@@ -14,6 +14,9 @@ export interface WatcherArticle {
   resonanceScore: number;
   contentHash: string;
   publishedAt: string;
+  coverUrl?: string | null;
+  coverThumbnailUrl?: string | null;
+  coverAssetId?: string | null;
   rawPayload?: Record<string, any>;
   busPublishedAt?: string | null;
   createdAt: string;

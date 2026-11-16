@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS lemon_watcher_items (
   content_hash VARCHAR(64) NOT NULL,
   published_at TIMESTAMPTZ NOT NULL,
   raw_payload JSONB DEFAULT '{}'::jsonb,
+  cover_url TEXT,
+  cover_thumbnail_url TEXT,
+  cover_asset_id VARCHAR(128),
   note_id VARCHAR(64),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT uq_lemon_watcher_items_watcher_guid UNIQUE(watcher_id, guid)

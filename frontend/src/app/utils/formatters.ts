@@ -46,3 +46,19 @@ export function getStoryBadgeClass(type: string): string {
       return 'bg-slate-700 text-slate-300';
   }
 }
+
+/**
+ * Wraps numbers and counts (+29, 30, +9, 54, +3, 10, etc.) in styled colored spans for rich rendering
+ */
+export function highlightCounts(text: string): string {
+  if (!text) return '';
+  return text
+    // Highlight "+N" counts with bright emerald green
+    .replace(/\+(\d+)/g, '<strong class="font-mono font-extrabold text-emerald-400 bg-emerald-500/15 px-1 py-0.5 rounded border border-emerald-500/25">+$1</strong>')
+    // Highlight "Всего в ленте: N" with amber gold
+    .replace(/(Всего в ленте:\s*)(\d+)/gi, '$1<strong class="font-mono font-bold text-amber-300 bg-amber-400/15 px-1 py-0.5 rounded border border-amber-400/25">$2</strong>')
+    // Highlight "Все N публикаций" with amber gold
+    .replace(/(Все\s*)(\d+)(\s*публикаций)/gi, '$1<strong class="font-mono font-bold text-amber-300 bg-amber-400/15 px-1 py-0.5 rounded border border-amber-400/25">$2</strong>$3')
+    // Highlight "Получено N новых"
+    .replace(/(Получено\s*)(\d+)(\s*новых)/gi, '$1<strong class="font-mono font-extrabold text-emerald-400 bg-emerald-500/15 px-1 py-0.5 rounded border border-emerald-500/25">$2</strong>$3');
+}

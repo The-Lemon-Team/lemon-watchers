@@ -20,27 +20,47 @@ export interface BusEventEnvelope {
 export class BusRelayAxon {
   private readonly busUrl: string;
   private readonly deviceId: string;
+  private readonly moderationMode: boolean;
   public readonly busEvents$ = new Subject<BusEventEnvelope>();
 
-  constructor(options: { busUrl: string; deviceId: string }) {
+  constructor(options: { busUrl: string; deviceId: string; moderationMode?: boolean }) {
     this.busUrl = options.busUrl.replace(/\/+$/, '');
     this.deviceId = options.deviceId;
+    this.moderationMode = options.moderationMode !== false;
   }
 
   /**
-   * Emits a pure autonomous collected item into the reactive LemonBus bridge.
-   * Formatted as a LemonBus Note payload so downstream subscribers (like Lemon Seasons)
-   * can seamlessly consume and display the note in their UI.
+   * Backwards-compatible alias for publishArticleToBus
    */
-  async publishArticleToBus(item: WatcherArticle): Promise<boolean> {
+  async publishCollectedItemToBus(
+    item: WatcherArticle,
+    options?: { requireModeration?: boolean }
+  ): Promise<boolean> {
+    return this.publishArticleToBus(item, options);
+  }
+
+  /**
+   * Emits a collected/enriched watcher item into the reactive LemonBus bridge.
+   * By default submits as a moderation candidate (action: 'PROPOSE', status: 'PENDING_MODERATION')
+   * so LemonBus queues it for editorial confirmation before publishing.
+   */
+  async publishArticleToBus(
+    item: WatcherArticle,
+    options?: { requireModeration?: boolean }
+  ): Promise<boolean> {
     const eventId = crypto.randomUUID();
     const feedSlug = `spark-${item.category || 'general'}`;
+    const requireModeration = options?.requireModeration ?? this.moderationMode;
+    const coverUrl = item.coverUrl || item.rawPayload?.coverUrl || null;
+    const coverThumbnailUrl = item.coverThumbnailUrl || item.rawPayload?.coverThumbnailUrl || coverUrl;
+    const coverAssetId = item.coverAssetId || item.rawPayload?.coverAssetId || null;
+
     const envelope: BusEventEnvelope = {
       eventId,
       timestamp: new Date().toISOString(),
       source: 'lemon-watchers',
       entityType: 'NOTE',
-      action: 'UPSERT',
+      action: requireModeration ? 'PROPOSE' : 'UPSERT',
       feedSlug,
       category: item.category || 'general',
       watcherSlug: item.watcherSlug || item.watcherId,
@@ -51,8 +71,9 @@ export class BusRelayAxon {
         description: item.summary,
         rawContent: item.content,
         summary: item.summary,
+        category: item.category || 'general',
         folderPath: `Spark/${item.category || 'general'}`,
-        status: 'PUBLISHED',
+        status: requireModeration ? 'PENDING_MODERATION' : 'PUBLISHED',
         privacy: 'public',
         feedSlug,
         publicFeedId: feedSlug,
@@ -68,13 +89,18 @@ export class BusRelayAxon {
         },
         author: item.author || item.watcherTitle || 'Lemon Watchers',
         resonanceScore: item.resonanceScore,
-        icon: '📰',
+        icon: (item.rawPayload?.icon as string) || '📰',
+        coverImage: coverUrl,
         hashtags: item.tags,
         metadata: {
           guid: item.guid,
           watcherSlug: item.watcherSlug,
           watcherTitle: item.watcherTitle,
           category: item.category,
+          coverUrl,
+          coverThumbnailUrl,
+          coverAssetId,
+          moderationRequired: requireModeration,
           ...(item.rawPayload || {}),
         },
       },

@@ -8,6 +8,21 @@ importers:
 
   .:
     dependencies:
+      '@lemon/ai-neurons':
+        specifier: file:../lemon-actions/packages/lemon-ai-neurons
+        version: file:../lemon-actions/packages/lemon-ai-neurons
+      '@lemon/core-combinator':
+        specifier: file:../lemon-actions/packages/core-combinator
+        version: file:../lemon-actions/packages/core-combinator
+      '@lemon/core-combinator-sdk':
+        specifier: file:../lemon-actions/packages/core-combinator-sdk
+        version: file:../lemon-actions/packages/core-combinator-sdk
+      '@lemon/media-hub-neurons':
+        specifier: file:../lemon-actions/packages/lemon-media-hub-neurons
+        version: file:../lemon-actions/packages/lemon-media-hub-neurons
+      '@lemon/seasons-neurons':
+        specifier: file:../lemon-actions/packages/lemon-seasons-neurons
+        version: file:../lemon-actions/packages/lemon-seasons-neurons
       dotenv:
         specifier: ^16.4.7
         version: 16.6.1
@@ -200,6 +215,21 @@ packages:
 
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
+
+  '@lemon/ai-neurons@file:../lemon-actions/packages/lemon-ai-neurons':
+    resolution: {directory: ../lemon-actions/packages/lemon-ai-neurons, type: directory}
+
+  '@lemon/core-combinator-sdk@file:../lemon-actions/packages/core-combinator-sdk':
+    resolution: {directory: ../lemon-actions/packages/core-combinator-sdk, type: directory}
+
+  '@lemon/core-combinator@file:../lemon-actions/packages/core-combinator':
+    resolution: {directory: ../lemon-actions/packages/core-combinator, type: directory}
+
+  '@lemon/media-hub-neurons@file:../lemon-actions/packages/lemon-media-hub-neurons':
+    resolution: {directory: ../lemon-actions/packages/lemon-media-hub-neurons, type: directory}
+
+  '@lemon/seasons-neurons@file:../lemon-actions/packages/lemon-seasons-neurons':
+    resolution: {directory: ../lemon-actions/packages/lemon-seasons-neurons, type: directory}
 
   '@rollup/rollup-android-arm-eabi@4.68.1':
     resolution: {integrity: sha512-67xgK/taQ7w18anfSxH4dy3RVwiu7GFT8aZglHVUnYisqIe4Qf1xQW7hWxe3lB7R5XSVfPJJKdKP31eGMID2zw==}
@@ -779,6 +809,29 @@ snapshots:
     optional: true
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
+
+  '@lemon/ai-neurons@file:../lemon-actions/packages/lemon-ai-neurons':
+    dependencies:
+      '@lemon/core-combinator-sdk': file:../lemon-actions/packages/core-combinator-sdk
+      rxjs: 7.8.2
+
+  '@lemon/core-combinator-sdk@file:../lemon-actions/packages/core-combinator-sdk':
+    dependencies:
+      '@lemon/core-combinator': file:../lemon-actions/packages/core-combinator
+
+  '@lemon/core-combinator@file:../lemon-actions/packages/core-combinator':
+    dependencies:
+      rxjs: 7.8.2
+
+  '@lemon/media-hub-neurons@file:../lemon-actions/packages/lemon-media-hub-neurons':
+    dependencies:
+      '@lemon/core-combinator-sdk': file:../lemon-actions/packages/core-combinator-sdk
+      rxjs: 7.8.2
+
+  '@lemon/seasons-neurons@file:../lemon-actions/packages/lemon-seasons-neurons':
+    dependencies:
+      '@lemon/core-combinator-sdk': file:../lemon-actions/packages/core-combinator-sdk
+      rxjs: 7.8.2
 
   '@rollup/rollup-android-arm-eabi@4.68.1':
     optional: true

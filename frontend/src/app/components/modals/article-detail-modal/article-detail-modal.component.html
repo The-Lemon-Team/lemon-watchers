@@ -24,6 +24,57 @@
 
     <!-- Body -->
     <div class="p-5 overflow-y-auto custom-scrollbar space-y-4 text-xs">
+      <!-- Cover image & Media Hub / AI actions -->
+      @if (item.coverUrl || item.coverThumbnailUrl) {
+        <div class="relative rounded-xl overflow-hidden border border-dark-700 bg-dark-900">
+          <img
+            [src]="item.coverUrl || item.coverThumbnailUrl"
+            [alt]="item.title"
+            class="w-full max-h-56 object-cover" />
+          <div class="absolute bottom-2 right-2 flex items-center space-x-1.5">
+            <button
+              (click)="generateCover.emit(item)"
+              [disabled]="generatingCoverIds().has(item.id)"
+              class="px-2.5 py-1 rounded-lg bg-dark-900/85 hover:bg-dark-800 text-lemon-400 border border-lemon-500/30 text-[11px] font-semibold backdrop-blur transition disabled:opacity-50">
+              {{ generatingCoverIds().has(item.id) ? 'Генерация...' : '🎨 Перегенерировать обложку' }}
+            </button>
+          </div>
+        </div>
+      }
+
+      <!-- AI Tools Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-2 bg-dark-800/70 p-2.5 rounded-xl border border-dark-750">
+        <span class="text-[11px] font-semibold text-slate-400">✨ AI-помощь &amp; Media Hub:</span>
+        <div class="flex flex-wrap items-center gap-1.5">
+          @if (!item.coverUrl && !item.coverThumbnailUrl) {
+            <button
+              (click)="generateCover.emit(item)"
+              [disabled]="generatingCoverIds().has(item.id)"
+              class="px-2.5 py-1 rounded-lg bg-dark-750 hover:bg-dark-700 text-amber-300 border border-amber-500/30 text-[11px] font-medium transition disabled:opacity-50">
+              {{ generatingCoverIds().has(item.id) ? '⏳ Обложка...' : '🎨 Сгенерировать обложку' }}
+            </button>
+          }
+          <button
+            (click)="assistContent.emit({ article: item, action: 'rewrite' })"
+            [disabled]="assistingArticleIds().has(item.id)"
+            class="px-2.5 py-1 rounded-lg bg-dark-750 hover:bg-dark-700 text-sky-300 border border-sky-500/30 text-[11px] font-medium transition disabled:opacity-50">
+            {{ assistingArticleIds().has(item.id) ? '⏳...' : '✍️ Переписать яснее' }}
+          </button>
+          <button
+            (click)="assistContent.emit({ article: item, action: 'expand' })"
+            [disabled]="assistingArticleIds().has(item.id)"
+            class="px-2.5 py-1 rounded-lg bg-dark-750 hover:bg-dark-700 text-violet-300 border border-violet-500/30 text-[11px] font-medium transition disabled:opacity-50">
+            🔍 Дополнить контекст
+          </button>
+          <button
+            (click)="assistContent.emit({ article: item, action: 'summarize' })"
+            [disabled]="assistingArticleIds().has(item.id)"
+            class="px-2.5 py-1 rounded-lg bg-dark-750 hover:bg-dark-700 text-emerald-300 border border-emerald-500/30 text-[11px] font-medium transition disabled:opacity-50">
+            ⚡ Сжать выжимку
+          </button>
+        </div>
+      </div>
+
       <!-- Resonance pill -->
       <div class="flex items-center justify-between bg-dark-800 p-3 rounded-xl border border-dark-750">
         <div class="flex items-center space-x-2">
@@ -82,7 +133,7 @@
       <div class="flex items-center space-x-2">
         @if (item.busPublishedAt) {
           <span class="px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 text-xs font-mono">
-            ✅ В LemonBus ({{ formatDate(item.busPublishedAt) }})
+            ✅ На модерации в LemonBus ({{ formatDate(item.busPublishedAt) }})
           </span>
         } @else {
           <button
@@ -90,7 +141,7 @@
             [disabled]="publishingBusIds().has(item.id)"
             class="px-3 py-1.5 rounded-lg bg-dark-750 hover:bg-dark-700 text-lemon-400 border border-lemon-500/30 font-bold text-xs flex items-center space-x-1.5 transition disabled:opacity-50">
             <span>📤</span>
-            <span>{{ publishingBusIds().has(item.id) ? 'Передача...' : 'Отправить в LemonBus' }}</span>
+            <span>{{ publishingBusIds().has(item.id) ? 'Отправка...' : 'На модерацию в LemonBus' }}</span>
           </button>
         }
         <a [href]="item.url" target="_blank" rel="noopener noreferrer" class="px-3.5 py-1.5 rounded-lg bg-lemon-500 hover:bg-lemon-400 text-slate-950 font-bold text-xs flex items-center space-x-1 transition">

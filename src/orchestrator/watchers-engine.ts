@@ -12,6 +12,11 @@ import { proxyQueue, ProxyLogRecord } from '../axons/proxy-queue.axon.js';
 import { StoryEvent } from '../types/story.types.js';
 import { NewsConverterQueueAxon } from '../axons/news-converter-queue.axon.js';
 import { RawNewsItem, PaginatedRawNews } from '../types/raw-news.types.js';
+import { CoreCombinatorClient } from '@lemon/core-combinator-sdk';
+import { AiStudioAxon, ImageAspectRatio } from '@lemon/ai-neurons';
+import { MediaLifecycleAxon } from '@lemon/media-hub-neurons';
+import { MediaCoverAxon } from '../axons/media-cover.axon.js';
+import { AiAssistAction } from '../axons/gemini-spark.axon.js';
 
 export class WatchersEngine {
   private readonly neurons = new Map<string, WatcherNeuron>();
@@ -19,20 +24,53 @@ export class WatchersEngine {
   private readonly gemini: GeminiSparkAxon;
   private readonly busRelay: BusRelayAxon;
   public readonly sse: WatchersSseManager;
+  public readonly combinator?: CoreCombinatorClient;
+  public readonly aiStudio?: AiStudioAxon;
+  public readonly mediaHub?: MediaLifecycleAxon;
+  public readonly mediaCover: MediaCoverAxon;
   private readonly converterQueue: NewsConverterQueueAxon;
   private readonly storyBuffer: StoryEvent[] = [];
 
   constructor(private readonly config: AppConfig) {
+    this.combinator = config.enableCoreCombinator
+      ? new CoreCombinatorClient({ baseUrl: config.coreCombinatorUrl })
+      : undefined;
+    this.aiStudio = config.enableAiService
+      ? new AiStudioAxon({
+          baseUrl: config.aiServiceUrl,
+          apiKey: config.aiServiceApiKey,
+          combinator: this.combinator,
+          basePath: '/watchers/ai',
+        })
+      : undefined;
+    this.mediaHub = config.enableMediaHub
+      ? new MediaLifecycleAxon({
+          baseUrl: config.mediaHubUrl,
+          apiKey: config.mediaHubApiKey,
+          combinator: this.combinator,
+          basePath: '/watchers/media',
+          folderPath: 'covers',
+          autoConnectSse: false,
+        })
+      : undefined;
+    this.mediaCover = new MediaCoverAxon({
+      aiStudio: this.aiStudio,
+      mediaHub: this.mediaHub,
+      mediaHubBaseUrl: config.mediaHubUrl,
+      enabled: config.enableCoverGeneration,
+    });
     this.db = new DatabaseService(config.databaseUrl);
     this.gemini = new GeminiSparkAxon({
       apiKey: config.geminiApiKey,
       modelName: config.geminiModel,
       proxyUrl: config.httpsProxy || config.httpProxy,
       enabled: config.enableAiEnrichment,
+      aiStudio: this.aiStudio,
     });
     this.busRelay = new BusRelayAxon({
       busUrl: config.lemonBusUrl,
       deviceId: config.deviceId,
+      moderationMode: config.busModerationMode,
     });
     this.sse = new WatchersSseManager();
 
@@ -40,6 +78,7 @@ export class WatchersEngine {
       db: this.db,
       gemini: this.gemini,
       busRelay: this.busRelay,
+      mediaCover: this.mediaCover,
       onArticleConverted: (article) => {
         this.sse.broadcastArticle(article);
       },
@@ -80,6 +119,22 @@ export class WatchersEngine {
     console.log('🍋 [WatchersEngine] Initializing autonomous PostgreSQL schema...');
     await this.db.initSchema();
 
+    if (this.aiStudio) {
+      await this.aiStudio
+        .start({ ensureCombinatorTopology: Boolean(this.combinator), loadHistory: false })
+        .catch((err) => {
+          console.warn(`⚠️ [WatchersEngine] AiStudioAxon init warning: ${err?.message || err}`);
+        });
+    }
+
+    if (this.mediaHub) {
+      await this.mediaHub
+        .start({ ensureCombinatorTopology: Boolean(this.combinator), loadInitial: false })
+        .catch((err) => {
+          console.warn(`⚠️ [WatchersEngine] MediaLifecycleAxon init warning: ${err?.message || err}`);
+        });
+    }
+
     console.log(
       `🍋 [WatchersEngine] Registering ${ALL_VERIFIED_SOURCES.length} verified news watchers...`
     );
@@ -97,6 +152,7 @@ export class WatchersEngine {
         db: this.db,
         gemini: this.gemini,
         busRelay: this.busRelay,
+        combinator: this.combinator,
         initialDelaySeconds: initialStaggerSec,
       });
 
@@ -206,6 +262,7 @@ export class WatchersEngine {
       db: this.db,
       gemini: this.gemini,
       busRelay: this.busRelay,
+      combinator: this.combinator,
       initialDelaySeconds: 1,
     });
 
@@ -398,6 +455,44 @@ export class WatchersEngine {
     return results;
   }
 
+  /** Бэкфилл: перевод выбранных старых статей на русский с сохранением оригинала в raw_payload. */
+  async translateArticles(
+    ids: string[]
+  ): Promise<{ translated: WatcherArticle[]; failed: { id: string; error: string }[] }> {
+    const translated: WatcherArticle[] = [];
+    const failed: { id: string; error: string }[] = [];
+    for (const id of ids) {
+      try {
+        const article = await this.db.getItemById(id);
+        if (!article) throw new Error('Not found');
+        if (article.rawPayload?.translationStatus === 'translated') continue;
+        const tr = await this.gemini.translateToRussian({
+          title: article.title,
+          summary: article.summary,
+          content: article.content,
+        });
+        if (tr.sourceLanguage === 'ru') continue;
+        const updated = await this.db.updateItemTranslation(id, {
+          title: tr.titleRu,
+          summary: tr.summaryRu,
+          content: tr.contentRu,
+          rawPayloadPatch: {
+            // не затираем оригинал, если он уже был сохранён
+            originalTitle: article.rawPayload?.originalTitle ?? article.title,
+            originalSummary: article.rawPayload?.originalSummary ?? article.summary,
+            originalContent: article.rawPayload?.originalContent ?? article.content,
+            sourceLanguage: tr.sourceLanguage,
+            translationStatus: 'translated',
+          },
+        });
+        if (updated) translated.push(updated);
+      } catch (err: any) {
+        failed.push({ id, error: err?.message || String(err) });
+      }
+    }
+    return { translated, failed };
+  }
+
   async convertAndPublishBatchRawNews(ids: string[]): Promise<WatcherArticle[]> {
     const results: WatcherArticle[] = [];
     for (const id of ids) {
@@ -415,6 +510,108 @@ export class WatchersEngine {
     return this.converterQueue.checkPendingItems();
   }
 
+  async generateArticleCover(
+    id: string,
+    options?: { prompt?: string; style?: string; aspectRatio?: ImageAspectRatio }
+  ): Promise<WatcherArticle | null> {
+    const article = await this.db.getItemById(id);
+    if (!article) return null;
+
+    const cover = await this.mediaCover.generateCoverForArticle({
+      id: article.id,
+      title: article.title,
+      summary: article.summary,
+      category: article.category,
+      tags: article.tags,
+      coverPrompt: options?.prompt || (article.rawPayload?.coverPrompt as string | undefined),
+      style: options?.style,
+      aspectRatio: options?.aspectRatio,
+    });
+
+    if (!cover) {
+      throw new Error('Cover generation unavailable (check lemon-ai-service / lemon-media-hub)');
+    }
+
+    const updated = await this.db.updateItemCover(id, {
+      coverUrl: cover.coverUrl,
+      coverThumbnailUrl: cover.coverThumbnailUrl,
+      coverAssetId: cover.coverAssetId,
+      rawPayloadPatch: {
+        coverUrl: cover.coverUrl,
+        coverThumbnailUrl: cover.coverThumbnailUrl,
+        coverAssetId: cover.coverAssetId,
+        coverPrompt: cover.synthesizedPrompt || options?.prompt,
+        coverModel: cover.model,
+      },
+    });
+
+    if (updated) {
+      this.sse.broadcastArticle(updated);
+      this.addStoryItem({
+        id: `cover-${updated.id}-${Date.now()}`,
+        type: 'NEWS_COLLECTED',
+        title: `Media Hub: Обложка сгенерирована`,
+        description: `Для «${updated.title}» создана обложка (${cover.model || 'ai-image'})`,
+        watcherId: updated.watcherId,
+        watcherTitle: updated.watcherTitle,
+        isProxyOnly: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return updated;
+  }
+
+  async assistArticleContent(
+    id: string,
+    options: { action?: AiAssistAction; instruction?: string }
+  ): Promise<WatcherArticle | null> {
+    const article = await this.db.getItemById(id);
+    if (!article) return null;
+
+    const assisted = await this.gemini.assistArticleContent({
+      id: article.id,
+      title: article.title,
+      summary: article.summary,
+      content: article.content,
+      url: article.url,
+      sourceTitle: article.watcherTitle || article.watcherSlug || 'Источник',
+      eventDate: article.publishedAt,
+      resonanceScore: article.resonanceScore,
+      tags: article.tags,
+      action: options.action || 'rewrite',
+      instruction: options.instruction,
+    });
+
+    const updated = await this.db.updateItemAiAssist(id, {
+      title: assisted.title,
+      summary: assisted.summary,
+      content: assisted.content,
+      tags: assisted.tags,
+      rawPayloadPatch: {
+        coverPrompt: assisted.coverPrompt || article.rawPayload?.coverPrompt,
+        aiAssistedBy: assisted.engine,
+        aiAssistedAt: new Date().toISOString(),
+      },
+    });
+
+    if (updated) {
+      this.sse.broadcastArticle(updated);
+      this.addStoryItem({
+        id: `assist-${updated.id}-${Date.now()}`,
+        type: 'NEWS_COLLECTED',
+        title: `AI Помощник: Контент обновлён`,
+        description: `Заметка «${updated.title}» доработана через ${assisted.engine}`,
+        watcherId: updated.watcherId,
+        watcherTitle: updated.watcherTitle,
+        isProxyOnly: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return updated;
+  }
+
   async publishArticleToBus(id: string): Promise<WatcherArticle | null> {
     const article = await this.db.getItemById(id);
     if (!article) return null;
@@ -425,8 +622,10 @@ export class WatchersEngine {
     this.addStoryItem({
       id: `bus-pub-${article.id}`,
       type: 'NEWS_COLLECTED',
-      title: `LemonBus: Опубликована заметка`,
-      description: `Заметка «${article.title}» (${article.watcherTitle || article.watcherId}) успешно передана в шину LemonBus`,
+      title: this.config.busModerationMode
+        ? `LemonBus: Отправлено на модерацию`
+        : `LemonBus: Опубликована заметка`,
+      description: `Заметка «${article.title}» (${article.watcherTitle || article.watcherId}) передана в LemonBus${this.config.busModerationMode ? ' (ожидает модерации)' : ''}`,
       watcherId: article.watcherId,
       watcherTitle: article.watcherTitle,
       isProxyOnly: false,
@@ -489,6 +688,8 @@ export class WatchersEngine {
   async shutdown(): Promise<void> {
     console.log('🍋 [WatchersEngine] Shutting down Watcher Neurons...');
     this.converterQueue.destroy();
+    this.aiStudio?.stop();
+    this.mediaHub?.stop();
     for (const neuron of this.neurons.values()) {
       neuron.stop();
     }

@@ -1,4 +1,4 @@
-import pg from 'pg';
+﻿import pg from 'pg';
 import crypto from 'node:crypto';
 import { WatcherConfig, WatcherState, WatcherFolder } from '../types/watcher.types.js';
 import { WatcherPingRecord, WatcherMetricsSnapshot } from '../types/ping.types.js';
@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS lemon_watcher_items (
   content_hash VARCHAR(64) NOT NULL,
   published_at TIMESTAMPTZ NOT NULL,
   raw_payload JSONB DEFAULT '{}'::jsonb,
+  cover_url TEXT,
+  cover_thumbnail_url TEXT,
+  cover_asset_id VARCHAR(128),
   note_id VARCHAR(64),
   bus_published_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -184,6 +187,9 @@ export class DatabaseService {
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS resonance_score INT NOT NULL DEFAULT 50;
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS raw_payload JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS cover_url TEXT;
+      ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS cover_thumbnail_url TEXT;
+      ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS cover_asset_id VARCHAR(128);
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS bus_published_at TIMESTAMPTZ;
     `);
 
@@ -499,20 +505,27 @@ export class DatabaseService {
     contentHash: string;
     publishedAt: string;
     rawPayload?: Record<string, any>;
+    coverUrl?: string | null;
+    coverThumbnailUrl?: string | null;
+    coverAssetId?: string | null;
     noteId?: string | null;
   }): Promise<WatcherArticle> {
     const id = item.id || crypto.randomUUID();
     const res = await this.pool.query(
       `INSERT INTO lemon_watcher_items (
         id, watcher_id, guid, url, title, summary, content, author,
-        tags, resonance_score, content_hash, published_at, raw_payload, note_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz, $13, $14)
+        tags, resonance_score, content_hash, published_at, raw_payload,
+        cover_url, cover_thumbnail_url, cover_asset_id, note_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz, $13, $14, $15, $16, $17)
       ON CONFLICT (watcher_id, guid) DO UPDATE SET
         title = EXCLUDED.title,
         summary = EXCLUDED.summary,
         content = EXCLUDED.content,
         tags = EXCLUDED.tags,
-        resonance_score = EXCLUDED.resonance_score
+        resonance_score = EXCLUDED.resonance_score,
+        cover_url = COALESCE(EXCLUDED.cover_url, lemon_watcher_items.cover_url),
+        cover_thumbnail_url = COALESCE(EXCLUDED.cover_thumbnail_url, lemon_watcher_items.cover_thumbnail_url),
+        cover_asset_id = COALESCE(EXCLUDED.cover_asset_id, lemon_watcher_items.cover_asset_id)
       RETURNING *`,
       [
         id,
@@ -528,11 +541,85 @@ export class DatabaseService {
         item.contentHash,
         item.publishedAt,
         JSON.stringify(item.rawPayload || {}),
+        item.coverUrl || null,
+        item.coverThumbnailUrl || null,
+        item.coverAssetId || null,
         item.noteId || null,
       ]
     );
 
     return this.mapItemRowToArticle(res.rows[0]);
+  }
+
+  async updateItemTranslation(
+    id: string,
+    data: { title: string; summary: string; content: string; rawPayloadPatch: Record<string, any> }
+  ): Promise<WatcherArticle | null> {
+    const res = await this.pool.query(
+      `UPDATE lemon_watcher_items
+       SET title = $2, summary = $3, content = $4,
+           raw_payload = COALESCE(raw_payload, '{}'::jsonb) || $5::jsonb
+       WHERE id = $1 RETURNING *`,
+      [id, data.title, data.summary, data.content, JSON.stringify(data.rawPayloadPatch)]
+    );
+    return res.rows[0] ? this.mapItemRowToArticle(res.rows[0]) : null;
+  }
+
+  async updateItemCover(
+    id: string,
+    data: {
+      coverUrl: string;
+      coverThumbnailUrl: string;
+      coverAssetId: string | null;
+      rawPayloadPatch?: Record<string, any>;
+    }
+  ): Promise<WatcherArticle | null> {
+    const res = await this.pool.query(
+      `UPDATE lemon_watcher_items
+       SET cover_url = $2,
+           cover_thumbnail_url = $3,
+           cover_asset_id = $4,
+           raw_payload = COALESCE(raw_payload, '{}'::jsonb) || $5::jsonb
+       WHERE id = $1 RETURNING *`,
+      [
+        id,
+        data.coverUrl,
+        data.coverThumbnailUrl,
+        data.coverAssetId,
+        JSON.stringify(data.rawPayloadPatch || {}),
+      ]
+    );
+    return res.rows[0] ? this.mapItemRowToArticle(res.rows[0]) : null;
+  }
+
+  async updateItemAiAssist(
+    id: string,
+    data: {
+      title: string;
+      summary: string;
+      content: string;
+      tags: string[];
+      rawPayloadPatch?: Record<string, any>;
+    }
+  ): Promise<WatcherArticle | null> {
+    const res = await this.pool.query(
+      `UPDATE lemon_watcher_items
+       SET title = $2,
+           summary = $3,
+           content = $4,
+           tags = $5::jsonb,
+           raw_payload = COALESCE(raw_payload, '{}'::jsonb) || $6::jsonb
+       WHERE id = $1 RETURNING *`,
+      [
+        id,
+        data.title,
+        data.summary,
+        data.content,
+        JSON.stringify(data.tags),
+        JSON.stringify(data.rawPayloadPatch || {}),
+      ]
+    );
+    return res.rows[0] ? this.mapItemRowToArticle(res.rows[0]) : null;
   }
 
   async getRecentItems(options: WatcherArticleQueryOptions = {}): Promise<PaginatedArticles> {
@@ -888,6 +975,9 @@ export class DatabaseService {
       }
     }
 
+    const rawPayload =
+      typeof row.raw_payload === 'string' ? JSON.parse(row.raw_payload) : row.raw_payload || {};
+
     return {
       id: row.id,
       watcherId: row.watcher_id,
@@ -904,7 +994,10 @@ export class DatabaseService {
       resonanceScore: row.resonance_score ?? 50,
       contentHash: row.content_hash,
       publishedAt: row.published_at ? new Date(row.published_at).toISOString() : new Date().toISOString(),
-      rawPayload: typeof row.raw_payload === 'string' ? JSON.parse(row.raw_payload) : row.raw_payload || {},
+      coverUrl: row.cover_url || rawPayload?.coverUrl || null,
+      coverThumbnailUrl: row.cover_thumbnail_url || rawPayload?.coverThumbnailUrl || row.cover_url || null,
+      coverAssetId: row.cover_asset_id || rawPayload?.coverAssetId || null,
+      rawPayload,
       busPublishedAt: row.bus_published_at ? new Date(row.bus_published_at).toISOString() : null,
       createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
     };
@@ -944,3 +1037,4 @@ export class DatabaseService {
     };
   }
 }
+

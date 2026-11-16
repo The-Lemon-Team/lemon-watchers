@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ override: true });
 
 export interface AppConfig {
   port: number;
@@ -13,6 +13,18 @@ export interface AppConfig {
   defaultPollIntervalSeconds: number;
   enableAiEnrichment: boolean;
   watcherProxyUrl?: string;
+  coreCombinatorUrl: string;
+  enableCoreCombinator: boolean;
+  aiServiceUrl: string;
+  aiServiceApiKey: string;
+  enableAiService: boolean;
+  mediaHubUrl: string;
+  mediaHubApiKey: string;
+  enableMediaHub: boolean;
+  enableCoverGeneration: boolean;
+  projectariumUrl: string;
+  enableProjectarium: boolean;
+  busModerationMode: boolean;
 }
 
 export const config: AppConfig = {
@@ -31,5 +43,23 @@ export const config: AppConfig = {
     10
   ),
   enableAiEnrichment: process.env.ENABLE_AI_ENRICHMENT !== 'false',
-  watcherProxyUrl: process.env.WATCHER_PROXY_URL || undefined,
+  watcherProxyUrl:
+    process.env.WATCHER_PROXY_URL && !process.env.WATCHER_PROXY_URL.includes('168.81.248.42')
+      ? process.env.WATCHER_PROXY_URL
+      : undefined,
+  coreCombinatorUrl: process.env.CORE_COMBINATOR_URL || 'http://127.0.0.1:3000/api',
+  enableCoreCombinator: process.env.ENABLE_CORE_COMBINATOR !== 'false',
+  aiServiceUrl: process.env.LEMON_AI_SERVICE_URL || 'http://127.0.0.1:3006',
+  aiServiceApiKey: process.env.LEMON_AI_API_KEY || 'lai_dev_watchers_key',
+  enableAiService: process.env.ENABLE_AI_SERVICE !== 'false',
+  mediaHubUrl: process.env.LEMON_MEDIA_HUB_URL || 'http://127.0.0.1:3005',
+  mediaHubApiKey: process.env.LEMON_MEDIA_HUB_API_KEY || 'lmh_dev_watchers_key',
+  enableMediaHub: process.env.ENABLE_MEDIA_HUB !== 'false',
+  enableCoverGeneration: process.env.ENABLE_COVER_GENERATION !== 'false',
+  projectariumUrl:
+    process.env.PROJECTARIUM_URL ||
+    process.env.CORE_COMBINATOR_URL ||
+    'http://127.0.0.1:3000/api',
+  enableProjectarium: process.env.ENABLE_PROJECTARIUM !== 'false',
+  busModerationMode: process.env.BUS_MODERATION_MODE !== 'false',
 };

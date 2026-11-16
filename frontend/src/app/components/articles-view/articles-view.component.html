@@ -249,6 +249,15 @@
               </div>
             </div>
 
+            @if (item.coverThumbnailUrl || item.coverUrl) {
+              <div (click)="openArticleModal.emit(item)" class="mb-2 rounded-lg overflow-hidden border border-dark-750 cursor-pointer">
+                <img
+                  [src]="item.coverThumbnailUrl || item.coverUrl"
+                  [alt]="item.title"
+                  class="w-full h-36 object-cover hover:scale-[1.02] transition-transform duration-200" />
+              </div>
+            }
+
             <h3 (click)="openArticleModal.emit(item)" class="text-sm font-bold text-white hover:text-lemon-400 transition cursor-pointer">
               {{ item.title }}
             </h3>

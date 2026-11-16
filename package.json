@@ -14,6 +14,11 @@
     "test": "vitest run test"
   },
   "dependencies": {
+    "@lemon/ai-neurons": "file:../lemon-actions/packages/lemon-ai-neurons",
+    "@lemon/core-combinator": "file:../lemon-actions/packages/core-combinator",
+    "@lemon/core-combinator-sdk": "file:../lemon-actions/packages/core-combinator-sdk",
+    "@lemon/media-hub-neurons": "file:../lemon-actions/packages/lemon-media-hub-neurons",
+    "@lemon/seasons-neurons": "file:../lemon-actions/packages/lemon-seasons-neurons",
     "dotenv": "^16.4.7",
     "fast-xml-parser": "^4.5.3",
     "https-proxy-agent": "^7.0.6",
