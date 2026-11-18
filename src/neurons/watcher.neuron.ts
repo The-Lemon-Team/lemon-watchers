@@ -371,16 +371,22 @@ export class WatcherNeuron {
               url: delta.raw.url,
               title: delta.raw.title,
               description: delta.raw.summary || '',
-              contentRaw: delta.raw.rawText || delta.raw.contentHtml || delta.raw.summary || '',
+              contentRaw: delta.raw.contentHtml || delta.raw.rawText || delta.raw.summary || '',
               author: delta.raw.author || this.config.title,
               pubDate: delta.raw.pubDate || new Date().toISOString(),
               categories: delta.raw.categories || [],
               contentHash: delta.contentHash,
+              imageUrl: delta.raw.imageUrl || null,
             });
 
             if (inserted) {
               processedNotesCount++;
-              this.rawNewsFlow$.next(inserted);
+              this.rawNewsFlow$.next({
+                ...inserted,
+                watcherSlug: inserted.watcherSlug || this.config.slug,
+                watcherTitle: inserted.watcherTitle || this.config.title,
+                category: inserted.category || this.config.category,
+              });
             }
           } catch (err: any) {
             console.error(

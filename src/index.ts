@@ -1,15 +1,18 @@
+import 'reflect-metadata';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { WatchersEngine } from './orchestrator/watchers-engine.js';
-import { WatchersHttpServer } from './server/watchers-http.server.js';
+import { WatchersNestServer } from './nest/watchers-nest.server.js';
 import { ProjectariumAxon } from './axons/projectarium.axon.js';
 
 export * from './types/watcher.types.js';
 export * from './types/ping.types.js';
 export * from './types/note-payload.types.js';
 export * from './types/article.types.js';
+export * from './types/stream-news.types.js';
 export * from './sources/sources-catalog.js';
+export { WatchersNestServer } from './nest/watchers-nest.server.js';
 
 async function bootstrap() {
   console.log('═══════════════════════════════════════════════════════════════');
@@ -33,10 +36,15 @@ async function bootstrap() {
   const listenPort = registration?.port ?? config.port;
 
   const engine = new WatchersEngine(config);
-  const server = new WatchersHttpServer(listenPort, engine);
+  const server = new WatchersNestServer(listenPort, engine);
 
-  await engine.initialize();
-  await server.start();
+  try {
+    await engine.initialize();
+    await server.start();
+  } catch (err) {
+    await projectarium.release();
+    throw err;
+  }
 
   const shutdown = async () => {
     console.log('\n🛑 [Lemon-Watchers] Gracefully shutting down...');

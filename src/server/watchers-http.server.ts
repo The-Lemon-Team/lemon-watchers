@@ -404,6 +404,50 @@ export class WatchersHttpServer {
       return;
     }
 
+    // Fetch & save original cover from news source via Media Hub (POST /api/v1/items/:id/fetch-original-cover)
+    const fetchOrigCoverMatch = pathname.match(/^\/api\/v1\/items\/([^/]+)\/fetch-original-cover$/);
+    if (fetchOrigCoverMatch && method === 'POST') {
+      const itemId = fetchOrigCoverMatch[1];
+      const body = await this.readJsonBody(req);
+      try {
+        const article = await this.engine.fetchOriginalArticleCover(
+          itemId,
+          typeof body.imageUrl === 'string' ? body.imageUrl : undefined
+        );
+        if (!article) {
+          this.sendJson(res, 404, { error: `Item not found: ${itemId}` });
+          return;
+        }
+        this.sendJson(res, 200, { message: 'Original cover saved via Media Hub', article });
+      } catch (err: any) {
+        this.sendJson(res, 502, { error: err?.message || 'Original cover fetch failed' });
+      }
+      return;
+    }
+
+    // Load stored cover image via MediaViewFlow / Media Hub (GET /api/v1/items/:id/cover)
+    const getCoverMatch = pathname.match(/^\/api\/v1\/items\/([^/]+)\/cover$/);
+    if (getCoverMatch && method === 'GET') {
+      const itemId = getCoverMatch[1];
+      const variant = url.searchParams.get('variant') || undefined;
+      try {
+        const loaded = await this.engine.loadArticleCover(itemId, variant);
+        if (!loaded) {
+          this.sendJson(res, 404, { error: `Cover not found for item: ${itemId}` });
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': loaded.contentType,
+          'Content-Length': String(loaded.buffer.byteLength),
+          'Cache-Control': 'public, max-age=3600',
+        });
+        res.end(loaded.buffer);
+      } catch (err: any) {
+        this.sendJson(res, 502, { error: err?.message || 'Failed to load cover' });
+      }
+      return;
+    }
+
     // AI content assistance for article (POST /api/v1/items/:id/ai-assist)
     const aiAssistMatch = pathname.match(/^\/api\/v1\/items\/([^/]+)\/ai-assist$/);
     if (aiAssistMatch && method === 'POST') {

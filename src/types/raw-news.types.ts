@@ -1,4 +1,4 @@
-export type RawNewsStatus = 'PENDING' | 'CONVERTING' | 'CONVERTED' | 'FAILED';
+export type RawNewsStatus = 'PENDING' | 'CONVERTING' | 'CONVERTED' | 'FAILED' | 'DISMISSED';
 
 export interface RawNewsItem {
   id: string;
@@ -15,6 +15,7 @@ export interface RawNewsItem {
   pubDate: string;
   categories: string[];
   contentHash: string;
+  imageUrl?: string | null;
   status: RawNewsStatus;
   noteId?: string | null;
   error?: string | null;

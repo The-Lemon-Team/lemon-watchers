@@ -85,3 +85,13 @@ CREATE TABLE IF NOT EXISTS lemon_watcher_items (
 CREATE INDEX IF NOT EXISTS idx_lemon_watcher_items_watcher_id ON lemon_watcher_items(watcher_id, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lemon_watcher_items_published_at ON lemon_watcher_items(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lemon_watcher_items_content_hash ON lemon_watcher_items(content_hash);
+
+CREATE TABLE IF NOT EXISTS lemon_seen_guids (
+  watcher_id VARCHAR(64) NOT NULL REFERENCES lemon_watchers(id) ON DELETE CASCADE,
+  guid TEXT NOT NULL,
+  content_hash VARCHAR(64),
+  seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (watcher_id, guid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lemon_seen_guids_seen_at ON lemon_seen_guids(seen_at);

@@ -4,6 +4,15 @@ import { WatcherConfig, WatcherState, WatcherFolder } from '../types/watcher.typ
 import { WatcherPingRecord, WatcherMetricsSnapshot } from '../types/ping.types.js';
 import { WatcherArticle, WatcherArticleQueryOptions, PaginatedArticles } from '../types/article.types.js';
 import { RawNewsItem, RawNewsStatus, PaginatedRawNews } from '../types/raw-news.types.js';
+import {
+  PaginatedStreamNews,
+  StreamCounts,
+  StreamNewsItem,
+  StreamQueryOptions,
+  mapRawStatusToStreamStatus,
+  mapStreamStatusToRawStatus,
+  stripHtmlToTeaser,
+} from '../types/stream-news.types.js';
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS lemon_watcher_folders (
@@ -103,6 +112,7 @@ CREATE TABLE IF NOT EXISTS lemon_raw_news (
   pub_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   categories JSONB DEFAULT '[]'::jsonb,
   content_hash VARCHAR(64) NOT NULL,
+  image_url TEXT,
   status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
   note_id VARCHAR(64),
   error TEXT,
@@ -113,6 +123,16 @@ CREATE TABLE IF NOT EXISTS lemon_raw_news (
 CREATE INDEX IF NOT EXISTS idx_lemon_raw_news_status ON lemon_raw_news(status);
 CREATE INDEX IF NOT EXISTS idx_lemon_raw_news_watcher_id ON lemon_raw_news(watcher_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lemon_raw_news_pub_date ON lemon_raw_news(pub_date DESC);
+
+CREATE TABLE IF NOT EXISTS lemon_seen_guids (
+  watcher_id VARCHAR(64) NOT NULL REFERENCES lemon_watchers(id) ON DELETE CASCADE,
+  guid TEXT NOT NULL,
+  content_hash VARCHAR(64),
+  seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (watcher_id, guid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lemon_seen_guids_seen_at ON lemon_seen_guids(seen_at);
 `;
 
 const DEFAULT_FOLDERS: Omit<WatcherFolder, 'createdAt'>[] = [
@@ -191,6 +211,7 @@ export class DatabaseService {
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS cover_thumbnail_url TEXT;
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS cover_asset_id VARCHAR(128);
       ALTER TABLE lemon_watcher_items ADD COLUMN IF NOT EXISTS bus_published_at TIMESTAMPTZ;
+      ALTER TABLE lemon_raw_news ADD COLUMN IF NOT EXISTS image_url TEXT;
     `);
 
     // Seed default folders
@@ -327,7 +348,9 @@ export class DatabaseService {
 
   async isItemAlreadyIngested(watcherId: string, guid: string): Promise<boolean> {
     const res = await this.pool.query(
-      `SELECT 1 FROM lemon_raw_news WHERE watcher_id = $1 AND guid = $2
+      `SELECT 1 FROM lemon_seen_guids WHERE watcher_id = $1 AND guid = $2
+       UNION
+       SELECT 1 FROM lemon_raw_news WHERE watcher_id = $1 AND guid = $2
        UNION
        SELECT 1 FROM lemon_watcher_items WHERE watcher_id = $1 AND guid = $2
        LIMIT 1`,
@@ -350,6 +373,7 @@ export class DatabaseService {
     pubDate?: string;
     categories?: string[];
     contentHash: string;
+    imageUrl?: string | null;
   }): Promise<RawNewsItem | null> {
     const id = item.id || crypto.randomUUID();
     const pubDate = item.pubDate ? new Date(item.pubDate) : new Date();
@@ -357,8 +381,8 @@ export class DatabaseService {
     const res = await this.pool.query(
       `INSERT INTO lemon_raw_news (
         id, watcher_id, guid, url, title, description, content_raw, author,
-        pub_date, categories, content_hash, status, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'PENDING', NOW())
+        pub_date, categories, content_hash, image_url, status, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'PENDING', NOW())
       ON CONFLICT (watcher_id, guid) DO NOTHING
       RETURNING *`,
       [
@@ -373,6 +397,7 @@ export class DatabaseService {
         pubDate,
         JSON.stringify(item.categories || []),
         item.contentHash,
+        item.imageUrl || null,
       ]
     );
 
@@ -488,6 +513,193 @@ export class DatabaseService {
     );
     if (!res.rowCount || res.rowCount === 0) return null;
     return this.mapRawNewsRowToItem(res.rows[0]);
+  }
+
+  async dismissRawNews(ids: string[]): Promise<RawNewsItem[]> {
+    const cleanIds = ids.filter((id) => typeof id === 'string' && id.trim().length > 0);
+    if (cleanIds.length === 0) return [];
+
+    const res = await this.pool.query(
+      `WITH updated AS (
+         UPDATE lemon_raw_news
+         SET status = 'DISMISSED',
+             content_raw = '',
+             error = NULL
+         WHERE id = ANY($1::varchar[])
+         RETURNING *
+       )
+       SELECT u.*, w.slug as watcher_slug, w.title as watcher_title, w.category as watcher_category
+       FROM updated u
+       LEFT JOIN lemon_watchers w ON w.id = u.watcher_id`,
+      [cleanIds]
+    );
+
+    return res.rows.map((row) => this.mapRawNewsRowToItem(row));
+  }
+
+  async pruneExpiredRawNews(ttlHours = 72): Promise<number> {
+    const safeHours = Math.max(1, Math.floor(ttlHours));
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO lemon_seen_guids (watcher_id, guid, content_hash, seen_at)
+         SELECT watcher_id, guid, content_hash, created_at
+         FROM lemon_raw_news
+         WHERE status IN ('PENDING', 'DISMISSED', 'FAILED')
+           AND created_at < NOW() - ($1::int * INTERVAL '1 hour')
+         ON CONFLICT (watcher_id, guid) DO NOTHING`,
+        [safeHours]
+      );
+
+      const delRes = await client.query(
+        `DELETE FROM lemon_raw_news
+         WHERE status IN ('PENDING', 'DISMISSED', 'FAILED')
+           AND created_at < NOW() - ($1::int * INTERVAL '1 hour')`,
+        [safeHours]
+      );
+      await client.query('COMMIT');
+      return delRes.rowCount ?? 0;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getStreamItems(options: StreamQueryOptions = {}): Promise<PaginatedStreamNews> {
+    const limit = Math.min(Math.max(options.limit || 25, 1), 100);
+    const offset = Math.max(options.offset || 0, 0);
+
+    const baseConditions: string[] = [];
+    const baseValues: any[] = [];
+    let pIdx = 1;
+
+    if (options.categories && options.categories.length > 0) {
+      baseConditions.push(`w.category = ANY($${pIdx}::text[])`);
+      baseValues.push(options.categories);
+      pIdx++;
+    }
+
+    if (options.watchers && options.watchers.length > 0) {
+      baseConditions.push(`(r.watcher_id = ANY($${pIdx}::text[]) OR w.slug = ANY($${pIdx}::text[]))`);
+      baseValues.push(options.watchers);
+      pIdx++;
+    }
+
+    if (options.search && options.search.trim().length > 0) {
+      baseConditions.push(`(r.title ILIKE $${pIdx} OR r.description ILIKE $${pIdx})`);
+      baseValues.push(`%${options.search.trim()}%`);
+      pIdx++;
+    }
+
+    const baseWhere = baseConditions.length > 0 ? `WHERE ${baseConditions.join(' AND ')}` : '';
+
+    // Aggregate counts across statuses for the active category/watcher filter
+    const countsRes = await this.pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE r.status = 'PENDING') AS new_count,
+         COUNT(*) FILTER (WHERE r.status = 'CONVERTED') AS promoted_count,
+         COUNT(*) FILTER (WHERE r.status = 'DISMISSED') AS dismissed_count,
+         COUNT(*) AS total_count
+       FROM lemon_raw_news r
+       LEFT JOIN lemon_watchers w ON w.id = r.watcher_id
+       ${baseWhere}`,
+      baseValues
+    );
+    const cRow = countsRes.rows[0] || {};
+    const counts: StreamCounts = {
+      newCount: parseInt(cRow.new_count || '0', 10),
+      promotedCount: parseInt(cRow.promoted_count || '0', 10),
+      dismissedCount: parseInt(cRow.dismissed_count || '0', 10),
+      totalCount: parseInt(cRow.total_count || '0', 10),
+    };
+
+    const itemConditions = [...baseConditions];
+    const itemValues = [...baseValues];
+    let itemPIdx = pIdx;
+
+    const statusFilter = options.status || 'NEW';
+    if (statusFilter !== 'ALL') {
+      const mappedStatus = mapStreamStatusToRawStatus(statusFilter);
+      if (mappedStatus) {
+        itemConditions.push(`r.status = $${itemPIdx}`);
+        itemValues.push(mappedStatus);
+        itemPIdx++;
+      }
+    }
+
+    const itemWhere = itemConditions.length > 0 ? `WHERE ${itemConditions.join(' AND ')}` : '';
+
+    const countRes = await this.pool.query(
+      `SELECT COUNT(*) FROM lemon_raw_news r
+       LEFT JOIN lemon_watchers w ON w.id = r.watcher_id
+       ${itemWhere}`,
+      itemValues
+    );
+    const total = parseInt(countRes.rows[0]?.count || '0', 10);
+
+    // Deliberately exclude r.content_raw for lightweight stream payload
+    const query = `
+      SELECT
+        r.id, r.watcher_id, r.guid, r.url, r.title, r.description,
+        r.author, r.pub_date, r.categories, r.image_url, r.status, r.note_id, r.created_at,
+        w.slug AS watcher_slug, w.title AS watcher_title,
+        w.category AS watcher_category, w.feed_slug AS watcher_feed_slug
+      FROM lemon_raw_news r
+      LEFT JOIN lemon_watchers w ON w.id = r.watcher_id
+      ${itemWhere}
+      ORDER BY r.pub_date DESC, r.created_at DESC
+      LIMIT $${itemPIdx} OFFSET $${itemPIdx + 1}
+    `;
+
+    itemValues.push(limit, offset);
+    const res = await this.pool.query(query, itemValues);
+
+    const items: StreamNewsItem[] = res.rows.map((row) => {
+      let categories: string[] = [];
+      if (Array.isArray(row.categories)) {
+        categories = row.categories;
+      } else if (typeof row.categories === 'string') {
+        try {
+          categories = JSON.parse(row.categories);
+        } catch {
+          categories = [];
+        }
+      }
+      const category = row.watcher_category || 'general';
+      const watcherSlug = row.watcher_slug || row.watcher_id;
+      const watcherTitle = row.watcher_title || watcherSlug;
+
+      return {
+        id: row.id,
+        watcherId: row.watcher_id,
+        watcherSlug,
+        watcherTitle,
+        category,
+        feedSlug: row.watcher_feed_slug || `spark-${category}`,
+        guid: row.guid,
+        url: row.url,
+        title: row.title || '',
+        teaser: stripHtmlToTeaser(row.description || '', 360),
+        imageUrl: row.image_url || null,
+        author: row.author || watcherTitle,
+        pubDate: row.pub_date ? new Date(row.pub_date).toISOString() : new Date().toISOString(),
+        categories,
+        status: mapRawStatusToStreamStatus(row.status),
+        noteId: row.note_id || null,
+        createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+      };
+    });
+
+    return {
+      items,
+      total,
+      limit,
+      offset,
+      counts,
+    };
   }
 
   // Autonomous storage for ingested items with full content
@@ -1030,6 +1242,7 @@ export class DatabaseService {
       pubDate: row.pub_date ? new Date(row.pub_date).toISOString() : new Date().toISOString(),
       categories,
       contentHash: row.content_hash,
+      imageUrl: row.image_url || null,
       status: row.status,
       noteId: row.note_id,
       error: row.error,

@@ -19,13 +19,22 @@
     "@lemon/core-combinator-sdk": "file:../lemon-actions/packages/core-combinator-sdk",
     "@lemon/media-hub-neurons": "file:../lemon-actions/packages/lemon-media-hub-neurons",
     "@lemon/seasons-neurons": "file:../lemon-actions/packages/lemon-seasons-neurons",
+    "@mozilla/readability": "^0.6.0",
+    "@nestjs/common": "10.4.15",
+    "@nestjs/core": "10.4.15",
+    "@nestjs/platform-express": "10.4.15",
+    "@nestjs/swagger": "8.1.0",
     "dotenv": "^16.4.7",
     "fast-xml-parser": "^4.5.3",
     "https-proxy-agent": "^7.0.6",
+    "linkedom": "^0.18.15",
     "pg": "^8.13.1",
-    "rxjs": "^7.8.1"
+    "reflect-metadata": "0.2.2",
+    "rxjs": "^7.8.1",
+    "swagger-ui-express": "5.0.1"
   },
   "devDependencies": {
+    "@types/express": "5.0.0",
     "@types/node": "^22.12.0",
     "@types/pg": "^8.11.11",
     "tsx": "^4.19.2",

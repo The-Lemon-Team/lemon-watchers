@@ -1,3 +1,5 @@
+import { Subject } from 'rxjs';
+import crypto from 'node:crypto';
 import { ALL_VERIFIED_SOURCES } from '../sources/sources-catalog.js';
 import { WatcherConfig, WatcherState, WatcherFolder } from '../types/watcher.types.js';
 import { WatcherPingRecord, WatcherMetricsSnapshot } from '../types/ping.types.js';
@@ -12,10 +14,19 @@ import { proxyQueue, ProxyLogRecord } from '../axons/proxy-queue.axon.js';
 import { StoryEvent } from '../types/story.types.js';
 import { NewsConverterQueueAxon } from '../axons/news-converter-queue.axon.js';
 import { RawNewsItem, PaginatedRawNews } from '../types/raw-news.types.js';
+import {
+  PaginatedStreamNews,
+  StreamLiveEvent,
+  StreamNewsItem,
+  StreamQueryOptions,
+  toStreamNewsItem,
+} from '../types/stream-news.types.js';
 import { CoreCombinatorClient } from '@lemon/core-combinator-sdk';
 import { AiStudioAxon, ImageAspectRatio } from '@lemon/ai-neurons';
 import { MediaLifecycleAxon } from '@lemon/media-hub-neurons';
 import { MediaCoverAxon } from '../axons/media-cover.axon.js';
+import { ArticleExtractorAxon } from '../axons/article-extractor.axon.js';
+import { extractFirstImageFromHtml } from '../axons/rss-atom-fetcher.axon.js';
 import { AiAssistAction } from '../axons/gemini-spark.axon.js';
 
 export class WatchersEngine {
@@ -28,8 +39,13 @@ export class WatchersEngine {
   public readonly aiStudio?: AiStudioAxon;
   public readonly mediaHub?: MediaLifecycleAxon;
   public readonly mediaCover: MediaCoverAxon;
+  private readonly articleExtractor: ArticleExtractorAxon;
   private readonly converterQueue: NewsConverterQueueAxon;
   private readonly storyBuffer: StoryEvent[] = [];
+  public readonly streamEvents$ = new Subject<StreamLiveEvent>();
+  private readonly streamReplayBuffer: StreamLiveEvent[] = [];
+  private readonly maxStreamReplaySize = 300;
+  private pruneTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly config: AppConfig) {
     this.combinator = config.enableCoreCombinator
@@ -57,7 +73,11 @@ export class WatchersEngine {
       aiStudio: this.aiStudio,
       mediaHub: this.mediaHub,
       mediaHubBaseUrl: config.mediaHubUrl,
+      proxyUrl: config.watcherProxyUrl || config.httpsProxy || config.httpProxy,
       enabled: config.enableCoverGeneration,
+    });
+    this.articleExtractor = new ArticleExtractorAxon({
+      proxyUrl: config.watcherProxyUrl || config.httpsProxy || config.httpProxy,
     });
     this.db = new DatabaseService(config.databaseUrl);
     this.gemini = new GeminiSparkAxon({
@@ -79,6 +99,7 @@ export class WatchersEngine {
       gemini: this.gemini,
       busRelay: this.busRelay,
       mediaCover: this.mediaCover,
+      articleExtractor: this.articleExtractor,
       onArticleConverted: (article) => {
         this.sse.broadcastArticle(article);
       },
@@ -170,6 +191,16 @@ export class WatchersEngine {
       // Stagger subsequent watchers by 2 seconds to prevent initial fetch flood
       initialStaggerSec += 2;
     }
+
+    // Run initial TTL cleanup and schedule periodic pruning every 6 hours
+    this.pruneExpiredRawNews().catch((err) => {
+      console.warn(`⚠️ [WatchersEngine] Initial raw news TTL prune warning: ${err?.message || err}`);
+    });
+    this.pruneTimer = setInterval(() => {
+      this.pruneExpiredRawNews().catch((err) => {
+        console.warn(`⚠️ [WatchersEngine] Scheduled raw news TTL prune warning: ${err?.message || err}`);
+      });
+    }, 6 * 60 * 60 * 1000);
 
     console.log('✅ [WatchersEngine] All Watcher Neurons are active and scheduled.');
   }
@@ -416,17 +447,203 @@ export class WatchersEngine {
 
       this.addStoryItem(item);
       this.busRelay.emitWatcherPing(ping, neuron.config.slug);
+      this.streamEvents$.next({
+        id: `ping-${ping.id}`,
+        type: 'watcher_ping',
+        timestamp: ping.createdAt,
+        category: neuron.config.category,
+        watcherId: neuron.config.id,
+        watcherSlug: neuron.config.slug,
+        ping,
+      });
     });
 
     neuron.deltaFlow$.subscribe((article) => {
       this.sse.broadcastArticle(article);
     });
 
-    // Human-in-the-loop: raw news are saved to DB and emitted to bus bridge,
-    // but NOT automatically converted to notes unless explicitly triggered by user
+    // Human-in-the-loop: raw news are saved to DB and emitted to reactive stream & bus bridge,
+    // but NOT automatically converted to notes unless explicitly promoted by user
     neuron.rawNewsFlow$.subscribe((rawItem) => {
       this.busRelay.emitRawNewsCollected(rawItem);
+      const streamItem = toStreamNewsItem(rawItem, {
+        watcherSlug: neuron.config.slug,
+        watcherTitle: neuron.config.title,
+        category: neuron.config.category,
+        feedSlug: neuron.config.feedSlug,
+      });
+      this.emitStreamNewsEvent({
+        id: `news-${streamItem.id}-${Date.now()}`,
+        type: 'news_item',
+        timestamp: streamItem.createdAt,
+        category: streamItem.category,
+        watcherId: streamItem.watcherId,
+        watcherSlug: streamItem.watcherSlug,
+        item: streamItem,
+      });
     });
+  }
+
+  private emitStreamNewsEvent(event: StreamLiveEvent): void {
+    this.streamReplayBuffer.push(event);
+    if (this.streamReplayBuffer.length > this.maxStreamReplaySize) {
+      this.streamReplayBuffer.shift();
+    }
+    this.streamEvents$.next(event);
+  }
+
+  matchesStreamFilter(
+    event: StreamLiveEvent,
+    filter: { categories?: Set<string>; watchers?: Set<string>; types?: Set<string> }
+  ): boolean {
+    if (filter.types && filter.types.size > 0 && !filter.types.has(event.type)) {
+      return false;
+    }
+    if (filter.categories && filter.categories.size > 0) {
+      const cat = event.category || event.item?.category;
+      if (!cat || !filter.categories.has(cat)) return false;
+    }
+    if (filter.watchers && filter.watchers.size > 0) {
+      const wId = event.watcherId || event.item?.watcherId;
+      const wSlug = event.watcherSlug || event.item?.watcherSlug;
+      if ((!wId || !filter.watchers.has(wId)) && (!wSlug || !filter.watchers.has(wSlug))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  getStreamReplay(options: {
+    categories?: string[];
+    watchers?: string[];
+    types?: string[];
+    limit?: number;
+    sinceId?: string;
+  } = {}): StreamLiveEvent[] {
+    const filter = {
+      categories: options.categories?.length ? new Set(options.categories) : undefined,
+      watchers: options.watchers?.length ? new Set(options.watchers) : undefined,
+      types: options.types?.length ? new Set(options.types) : undefined,
+    };
+
+    let events = this.streamReplayBuffer;
+    if (options.sinceId) {
+      const idx = events.findIndex((e) => e.id === options.sinceId);
+      if (idx >= 0) {
+        events = events.slice(idx + 1);
+      }
+    }
+
+    const matched = events.filter((ev) => this.matchesStreamFilter(ev, filter));
+    const limit = Math.min(Math.max(options.limit ?? 25, 0), 200);
+    return limit > 0 ? matched.slice(-limit) : [];
+  }
+
+  async getStreamItems(options: StreamQueryOptions = {}): Promise<PaginatedStreamNews> {
+    return this.db.getStreamItems(options);
+  }
+
+  async promoteStreamItem(
+    id: string
+  ): Promise<{ article: WatcherArticle; item: StreamNewsItem } | null> {
+    const article = await this.converterQueue.convertById(id);
+    if (!article) return null;
+
+    await this.publishArticleToBus(article.id);
+    const updatedArticle = (await this.db.getItemById(article.id)) || article;
+    const raw = await this.db.getRawNewsById(id);
+    const neuron = this.neurons.get(updatedArticle.watcherId);
+
+    const streamItem: StreamNewsItem = raw
+      ? toStreamNewsItem(raw, {
+          watcherSlug: neuron?.config.slug,
+          watcherTitle: neuron?.config.title,
+          category: neuron?.config.category,
+          feedSlug: neuron?.config.feedSlug,
+        })
+      : {
+          id,
+          watcherId: updatedArticle.watcherId,
+          watcherSlug: updatedArticle.watcherSlug || neuron?.config.slug || updatedArticle.watcherId,
+          watcherTitle: updatedArticle.watcherTitle || neuron?.config.title || 'Watcher',
+          category: updatedArticle.category || neuron?.config.category || 'general',
+          feedSlug: neuron?.config.feedSlug || `spark-${updatedArticle.category || 'general'}`,
+          guid: updatedArticle.guid,
+          url: updatedArticle.url,
+          title: updatedArticle.title,
+          teaser: updatedArticle.summary,
+          imageUrl: updatedArticle.coverUrl || null,
+          author: updatedArticle.author,
+          pubDate: updatedArticle.publishedAt,
+          categories: updatedArticle.tags || [],
+          status: 'PROMOTED',
+          noteId: updatedArticle.id,
+          createdAt: updatedArticle.createdAt,
+        };
+
+    this.emitStreamNewsEvent({
+      id: `promote-${id}-${Date.now()}`,
+      type: 'news_promoted',
+      timestamp: new Date().toISOString(),
+      category: streamItem.category,
+      watcherId: streamItem.watcherId,
+      watcherSlug: streamItem.watcherSlug,
+      item: streamItem,
+      articleId: updatedArticle.id,
+      noteId: updatedArticle.id,
+    });
+
+    return { article: updatedArticle, item: streamItem };
+  }
+
+  async promoteBatchStreamItems(
+    ids: string[]
+  ): Promise<{ count: number; articles: WatcherArticle[] }> {
+    const articles: WatcherArticle[] = [];
+    for (const id of ids) {
+      const res = await this.promoteStreamItem(id);
+      if (res) articles.push(res.article);
+    }
+    return { count: articles.length, articles };
+  }
+
+  async dismissStreamItems(
+    ids: string[]
+  ): Promise<{ count: number; items: StreamNewsItem[] }> {
+    const dismissedRaw = await this.db.dismissRawNews(ids);
+    const items: StreamNewsItem[] = [];
+
+    for (const raw of dismissedRaw) {
+      const neuron = this.neurons.get(raw.watcherId);
+      const streamItem = toStreamNewsItem(raw, {
+        watcherSlug: neuron?.config.slug,
+        watcherTitle: neuron?.config.title,
+        category: neuron?.config.category,
+        feedSlug: neuron?.config.feedSlug,
+      });
+      items.push(streamItem);
+      this.emitStreamNewsEvent({
+        id: `dismiss-${streamItem.id}-${Date.now()}`,
+        type: 'news_dismissed',
+        timestamp: new Date().toISOString(),
+        category: streamItem.category,
+        watcherId: streamItem.watcherId,
+        watcherSlug: streamItem.watcherSlug,
+        item: streamItem,
+        itemIds: [streamItem.id],
+      });
+    }
+
+    return { count: items.length, items };
+  }
+
+  async pruneExpiredRawNews(ttlHours?: number): Promise<{ pruned: number; ttlHours: number }> {
+    const hours = ttlHours && ttlHours > 0 ? ttlHours : this.config.rawNewsTtlHours;
+    const pruned = await this.db.pruneExpiredRawNews(hours);
+    if (pruned > 0) {
+      console.log(`🧹 [WatchersEngine] Pruned ${pruned} expired raw news items (TTL: ${hours}h)`);
+    }
+    return { pruned, ttlHours: hours };
   }
 
   async getRawNews(options: {
@@ -494,16 +711,8 @@ export class WatchersEngine {
   }
 
   async convertAndPublishBatchRawNews(ids: string[]): Promise<WatcherArticle[]> {
-    const results: WatcherArticle[] = [];
-    for (const id of ids) {
-      const article = await this.converterQueue.convertById(id);
-      if (article) {
-        await this.publishArticleToBus(article.id);
-        const updated = await this.db.getItemById(article.id);
-        results.push(updated || article);
-      }
-    }
-    return results;
+    const res = await this.promoteBatchStreamItems(ids);
+    return res.articles;
   }
 
   async checkPendingRawNews(): Promise<number> {
@@ -540,6 +749,7 @@ export class WatchersEngine {
         coverUrl: cover.coverUrl,
         coverThumbnailUrl: cover.coverThumbnailUrl,
         coverAssetId: cover.coverAssetId,
+        coverSource: cover.source || 'ai',
         coverPrompt: cover.synthesizedPrompt || options?.prompt,
         coverModel: cover.model,
       },
@@ -560,6 +770,133 @@ export class WatchersEngine {
     }
 
     return updated;
+  }
+
+  /**
+   * Loads the original cover from the news source (raw_news.imageUrl, HTML <img>, or article og:image)
+   * and saves it into Lemon Media Hub via MediaLifecycleAxon (MediaIngestFlow + MediaViewFlow).
+   */
+  async fetchOriginalArticleCover(
+    id: string,
+    externalImageUrl?: string
+  ): Promise<WatcherArticle | null> {
+    const article = await this.db.getItemById(id);
+    if (!article) return null;
+
+    let candidateUrl =
+      externalImageUrl ||
+      (article.rawPayload?.originalCoverUrl as string | undefined) ||
+      undefined;
+
+    if (!candidateUrl && article.rawPayload?.rawNewsId) {
+      const rawNews = await this.db.getRawNewsById(String(article.rawPayload.rawNewsId));
+      if (rawNews) {
+        candidateUrl =
+          rawNews.imageUrl ||
+          extractFirstImageFromHtml(rawNews.contentRaw || rawNews.description, rawNews.url || article.url);
+      }
+    }
+
+    if (!candidateUrl) {
+      candidateUrl = extractFirstImageFromHtml(article.content, article.url);
+    }
+
+    const cover = await this.mediaCover.resolveOriginalCover({
+      id: article.id,
+      title: article.title,
+      category: article.category,
+      tags: article.tags,
+      externalImageUrl: candidateUrl,
+      articleUrl: article.url,
+    });
+
+    if (!cover) {
+      throw new Error('Original cover not found or could not be downloaded from news source');
+    }
+
+    const updated = await this.db.updateItemCover(id, {
+      coverUrl: cover.coverUrl,
+      coverThumbnailUrl: cover.coverThumbnailUrl,
+      coverAssetId: cover.coverAssetId,
+      rawPayloadPatch: {
+        coverUrl: cover.coverUrl,
+        coverThumbnailUrl: cover.coverThumbnailUrl,
+        coverAssetId: cover.coverAssetId,
+        coverSource: 'original',
+        originalCoverUrl: cover.originalImageUrl || candidateUrl || null,
+      },
+    });
+
+    if (updated) {
+      this.sse.broadcastArticle(updated);
+      this.addStoryItem({
+        id: `orig-cover-${updated.id}-${Date.now()}`,
+        type: 'NEWS_COLLECTED',
+        title: `Media Hub: Оригинальная обложка сохранена`,
+        description: `Загружена оригинальная обложка для «${updated.title}»`,
+        watcherId: updated.watcherId,
+        watcherTitle: updated.watcherTitle,
+        isProxyOnly: false,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return updated;
+  }
+
+  /**
+   * Loads an article's stored cover image via MediaLifecycleAxon.viewMedia (MediaViewFlow)
+   * and streams it from Lemon Media Hub (or falls back to the stored coverUrl).
+   */
+  async loadArticleCover(
+    id: string,
+    variant?: string
+  ): Promise<{ buffer: Buffer; contentType: string; assetId: string | null } | null> {
+    const article = await this.db.getItemById(id);
+    if (!article) return null;
+
+    if (article.coverAssetId) {
+      const streamed = await this.mediaCover.fetchCoverStream(article.coverAssetId, variant);
+      if (streamed) {
+        const arrayBuf = await streamed.response.arrayBuffer();
+        return {
+          buffer: Buffer.from(arrayBuf),
+          contentType: streamed.contentType,
+          assetId: article.coverAssetId,
+        };
+      }
+
+      const view = await this.mediaCover.loadCoverView(article.coverAssetId, variant);
+      if (view?.url) {
+        const res = await fetch(view.url, { signal: AbortSignal.timeout(8000) });
+        if (res.ok) {
+          const arrayBuf = await res.arrayBuffer();
+          return {
+            buffer: Buffer.from(arrayBuf),
+            contentType: res.headers.get('content-type') || 'image/webp',
+            assetId: article.coverAssetId,
+          };
+        }
+      }
+    }
+
+    const fallbackUrl =
+      variant === 'thumb'
+        ? article.coverThumbnailUrl || article.coverUrl
+        : article.coverUrl || article.coverThumbnailUrl;
+    if (!fallbackUrl) return null;
+
+    const resolvedUrl = this.mediaCover.resolveMediaUrl(fallbackUrl);
+    if (!resolvedUrl) return null;
+
+    const res = await fetch(resolvedUrl, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const arrayBuf = await res.arrayBuffer();
+    return {
+      buffer: Buffer.from(arrayBuf),
+      contentType: res.headers.get('content-type') || 'image/jpeg',
+      assetId: article.coverAssetId || null,
+    };
   }
 
   async assistArticleContent(
@@ -612,11 +949,74 @@ export class WatchersEngine {
     return updated;
   }
 
+  /**
+   * Prepares an article for LemonBus:
+   * keeps Russian articles as-is, and translates foreign-language articles to Russian
+   * while preserving the English/original version inside metadata (rawPayload).
+   */
+  private async prepareArticleForBus(article: WatcherArticle): Promise<WatcherArticle> {
+    const sourceLang = String(article.rawPayload?.sourceLanguage || '').toLowerCase();
+    const trStatus = String(article.rawPayload?.translationStatus || '');
+
+    if (sourceLang === 'ru' || trStatus === 'original-ru' || trStatus === 'translated') {
+      return article;
+    }
+
+    try {
+      const tr = await this.gemini.translateToRussian({
+        title: article.title,
+        summary: article.summary,
+        content: article.content,
+      });
+
+      if (tr.sourceLanguage === 'ru') {
+        return {
+          ...article,
+          rawPayload: {
+            ...(article.rawPayload || {}),
+            sourceLanguage: 'ru',
+            translationStatus: 'original-ru',
+          },
+        };
+      }
+
+      return {
+        ...article,
+        title: tr.titleRu,
+        summary: tr.summaryRu,
+        content: tr.contentRu,
+        rawPayload: {
+          ...(article.rawPayload || {}),
+          originalTitle: article.rawPayload?.originalTitle ?? article.title,
+          originalSummary: article.rawPayload?.originalSummary ?? article.summary,
+          originalContent: article.rawPayload?.originalContent ?? article.content,
+          sourceLanguage: tr.sourceLanguage || sourceLang || 'en',
+          translationStatus: 'translated',
+        },
+      };
+    } catch (err: any) {
+      console.warn(
+        `[WatchersEngine] LemonBus translation fallback for "${article.title}": ${err?.message || err}`
+      );
+      return {
+        ...article,
+        rawPayload: {
+          ...(article.rawPayload || {}),
+          originalTitle: article.rawPayload?.originalTitle ?? article.title,
+          originalSummary: article.rawPayload?.originalSummary ?? article.summary,
+          originalContent: article.rawPayload?.originalContent ?? article.content,
+          sourceLanguage: sourceLang || 'unknown',
+        },
+      };
+    }
+  }
+
   async publishArticleToBus(id: string): Promise<WatcherArticle | null> {
     const article = await this.db.getItemById(id);
     if (!article) return null;
 
-    await this.busRelay.publishArticleToBus(article);
+    const busArticle = await this.prepareArticleForBus(article);
+    await this.busRelay.publishArticleToBus(busArticle);
     const updated = await this.db.markItemPublishedToBus(id);
 
     this.addStoryItem({
@@ -625,7 +1025,7 @@ export class WatchersEngine {
       title: this.config.busModerationMode
         ? `LemonBus: Отправлено на модерацию`
         : `LemonBus: Опубликована заметка`,
-      description: `Заметка «${article.title}» (${article.watcherTitle || article.watcherId}) передана в LemonBus${this.config.busModerationMode ? ' (ожидает модерации)' : ''}`,
+      description: `Заметка «${busArticle.title}» (${article.watcherTitle || article.watcherId}) передана в LemonBus${this.config.busModerationMode ? ' (ожидает модерации)' : ''}`,
       watcherId: article.watcherId,
       watcherTitle: article.watcherTitle,
       isProxyOnly: false,
@@ -640,7 +1040,8 @@ export class WatchersEngine {
     const published: WatcherArticle[] = [];
 
     for (const article of pending) {
-      await this.busRelay.publishArticleToBus(article);
+      const busArticle = await this.prepareArticleForBus(article);
+      await this.busRelay.publishArticleToBus(busArticle);
       const updated = await this.db.markItemPublishedToBus(article.id);
       if (updated) published.push(updated);
     }
@@ -687,12 +1088,17 @@ export class WatchersEngine {
 
   async shutdown(): Promise<void> {
     console.log('🍋 [WatchersEngine] Shutting down Watcher Neurons...');
+    if (this.pruneTimer) {
+      clearInterval(this.pruneTimer);
+      this.pruneTimer = null;
+    }
     this.converterQueue.destroy();
     this.aiStudio?.stop();
     this.mediaHub?.stop();
     for (const neuron of this.neurons.values()) {
       neuron.stop();
     }
+    this.streamEvents$.complete();
     this.sse.destroy();
     await this.db.close();
   }

@@ -71,4 +71,5 @@ export interface RawFeedItem {
   author?: string;
   categories?: string[];
   imageUrl?: string;
+  contentOrigin?: 'feed' | 'scraped' | 'ai_generated';
 }

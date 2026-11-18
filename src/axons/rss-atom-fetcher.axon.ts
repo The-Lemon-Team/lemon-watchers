@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { RawFeedItem, WatcherProtocol } from '../types/watcher.types.js';
-import { cleanHtmlContent } from './content-cleaner.axon.js';
+import { cleanHtmlContent, htmlToArticleMarkdown } from './content-cleaner.axon.js';
 import { config } from '../config.js';
 import { proxyQueue } from './proxy-queue.axon.js';
 
@@ -223,10 +223,15 @@ function extractRssItem(it: any, sourceUrl: string): RawFeedItem | null {
 
   if (!title && !guid) return null;
 
-  const rawDesc =
-    getNodeText(it.description) ||
-    getNodeText(it['content:encoded']) ||
-    '';
+  const descRaw = getNodeText(it.description);
+  const encodedRaw = getNodeText(it['content:encoded']);
+  const descText = cleanHtmlContent(descRaw);
+  const encodedText = cleanHtmlContent(encodedRaw);
+
+  const fullHtml =
+    encodedText.length >= descText.length ? encodedRaw || descRaw : descRaw;
+  const fullText = htmlToArticleMarkdown(fullHtml) || descText || encodedText;
+  const cleanSummary = (descText || encodedText).slice(0, 1000);
 
   const pubDateRaw =
     getNodeText(it.pubDate) ||
@@ -240,18 +245,18 @@ function extractRssItem(it: any, sourceUrl: string): RawFeedItem | null {
     pubDateIso = new Date().toISOString();
   }
 
-  const cleanSummary = cleanHtmlContent(rawDesc).slice(0, 1000);
+  const itemUrl = String(link).trim();
 
   return {
     guid: String(guid).trim(),
-    url: String(link).trim(),
+    url: itemUrl,
     title: String(title).trim(),
     summary: cleanSummary,
-    contentHtml: rawDesc,
-    rawText: cleanSummary,
+    contentHtml: fullHtml,
+    rawText: fullText,
     pubDate: pubDateIso,
     author: getNodeText(it.author) || getNodeText(it['dc:creator']) || undefined,
-    imageUrl: extractFeedImageUrl(it, rawDesc),
+    imageUrl: extractFeedImageUrl(it, fullHtml || descRaw, itemUrl || sourceUrl),
   };
 }
 
@@ -270,10 +275,15 @@ function extractAtomEntry(en: any, sourceUrl: string): RawFeedItem | null {
   }
 
   const guid = getNodeText(en.id) || link;
-  const rawContent =
-    getNodeText(en.content) ||
-    getNodeText(en.summary) ||
-    '';
+  const contentRaw = getNodeText(en.content);
+  const summaryRaw = getNodeText(en.summary);
+  const contentText = cleanHtmlContent(contentRaw);
+  const summaryText = cleanHtmlContent(summaryRaw);
+
+  const fullHtml =
+    contentText.length >= summaryText.length ? contentRaw || summaryRaw : summaryRaw;
+  const fullText = htmlToArticleMarkdown(fullHtml) || contentText || summaryText;
+  const cleanSummary = (summaryText || contentText).slice(0, 1000);
 
   const pubDateRaw =
     getNodeText(en.published) ||
@@ -287,18 +297,18 @@ function extractAtomEntry(en: any, sourceUrl: string): RawFeedItem | null {
     pubDateIso = new Date().toISOString();
   }
 
-  const cleanSummary = cleanHtmlContent(rawContent).slice(0, 1000);
+  const itemUrl = String(link).trim();
 
   return {
     guid: String(guid).trim(),
-    url: String(link).trim(),
+    url: itemUrl,
     title: String(title).trim(),
     summary: cleanSummary,
-    contentHtml: rawContent,
-    rawText: cleanSummary,
+    contentHtml: fullHtml,
+    rawText: fullText,
     pubDate: pubDateIso,
     author: getNodeText(en.author?.name) || undefined,
-    imageUrl: extractFeedImageUrl(en, rawContent),
+    imageUrl: extractFeedImageUrl(en, fullHtml || contentRaw, itemUrl || sourceUrl),
   };
 }
 
@@ -325,14 +335,19 @@ function parseJsonApiItems(json: any, sourceUrl: string): RawFeedItem[] {
   if (Array.isArray(json)) {
     for (const p of json) {
       if (p.paper?.id) {
+        const pageUrl = `https://huggingface.co/papers/${p.paper.id}`;
         results.push({
           guid: p.paper.id,
-          url: `https://huggingface.co/papers/${p.paper.id}`,
+          url: pageUrl,
           title: p.paper.title,
           summary: cleanHtmlContent(p.paper.summary || ''),
           pubDate: p.paper.publishedAt || new Date().toISOString(),
           author: p.paper.authors?.[0]?.name,
           categories: ['ai', 'papers'],
+          imageUrl: resolveCandidateImageUrl(
+            p.thumbnail || p.paper?.thumbnail || p.mediaUrls?.[0],
+            pageUrl
+          ),
         });
       }
     }
@@ -351,31 +366,102 @@ function getNodeText(node: any): string {
   return '';
 }
 
-function extractFeedImageUrl(node: any, htmlContent: string): string | undefined {
+const IMAGE_EXT_RE = /\.(?:jpe?g|png|webp|gif|avif|bmp|tiff?)(?:[?#]|$)/i;
+const TRACKING_IMAGE_RE = /(?:1x1|pixel|tracker|spacer|blank\.gif|feedburner\.com\/~r\/|doubleclick\.net)/i;
+
+export function resolveCandidateImageUrl(
+  rawUrl?: string | null,
+  baseUrl?: string
+): string | undefined {
+  if (!rawUrl || typeof rawUrl !== 'string') return undefined;
+  const trimmed = rawUrl.trim().replace(/&amp;/g, '&');
+  if (!trimmed || /^data:/i.test(trimmed) || TRACKING_IMAGE_RE.test(trimmed)) {
+    return undefined;
+  }
+  try {
+    const resolved = baseUrl ? new URL(trimmed, baseUrl).href : new URL(trimmed).href;
+    if (/^https?:\/\//i.test(resolved)) {
+      return resolved;
+    }
+  } catch {
+    // Ignore malformed URLs
+  }
+  return undefined;
+}
+
+export function extractFirstImageFromHtml(
+  htmlContent?: string | null,
+  baseUrl?: string
+): string | undefined {
+  if (!htmlContent) return undefined;
+  const imgTagRe = /<img\b[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = imgTagRe.exec(htmlContent)) !== null) {
+    const tag = match[0];
+    // Skip explicit 1x1 tracking pixels
+    if (/\b(?:width|height)=["']?1(?:px)?["']?/i.test(tag)) continue;
+
+    const attrMatch = tag.match(/\b(?:src|data-src|data-original)=["']([^"']+)["']/i);
+    if (!attrMatch?.[1]) continue;
+
+    const resolved = resolveCandidateImageUrl(attrMatch[1], baseUrl);
+    if (resolved) return resolved;
+  }
+  return undefined;
+}
+
+function extractFeedImageUrl(
+  node: any,
+  htmlContent: string,
+  baseUrl?: string
+): string | undefined {
   const mediaCandidates = [
     node['media:content'],
     node['media:thumbnail'],
+    node['media:group']?.['media:content'],
+    node['media:group']?.['media:thumbnail'],
     node.enclosure,
     node['itunes:image'],
+    node.image,
   ];
 
   for (const candidate of mediaCandidates) {
     const items = Array.isArray(candidate) ? candidate : candidate ? [candidate] : [];
     for (const entry of items) {
-      const url = entry?.['@_url'] || entry?.['@_href'];
+      const rawUrl =
+        typeof entry === 'string'
+          ? entry
+          : entry?.['@_url'] || entry?.['@_href'] || getNodeText(entry?.url) || getNodeText(entry);
       const type = String(entry?.['@_type'] || '').toLowerCase();
-      if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-        if (!type || type.startsWith('image/') || entry === node['media:thumbnail']) {
-          return url;
+      const medium = String(entry?.['@_medium'] || '').toLowerCase();
+      const isThumbnail =
+        entry === node['media:thumbnail'] ||
+        entry === node['itunes:image'] ||
+        medium === 'image' ||
+        type.startsWith('image/') ||
+        (!type && (!rawUrl || IMAGE_EXT_RE.test(rawUrl) || entry === node['media:content']));
+
+      if (isThumbnail) {
+        const resolved = resolveCandidateImageUrl(rawUrl, baseUrl);
+        if (resolved) return resolved;
+      }
+    }
+  }
+
+  // Atom <link rel="enclosure" type="image/..." href="...">
+  if (node.link) {
+    const links = Array.isArray(node.link) ? node.link : [node.link];
+    for (const l of links) {
+      if (l?.['@_rel'] === 'enclosure') {
+        const type = String(l['@_type'] || '').toLowerCase();
+        const href = l['@_href'];
+        if (type.startsWith('image/') || (typeof href === 'string' && IMAGE_EXT_RE.test(href))) {
+          const resolved = resolveCandidateImageUrl(href, baseUrl);
+          if (resolved) return resolved;
         }
       }
     }
   }
 
-  if (htmlContent) {
-    const imgMatch = htmlContent.match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/i);
-    if (imgMatch?.[1]) return imgMatch[1];
-  }
-
-  return undefined;
+  return extractFirstImageFromHtml(htmlContent, baseUrl);
 }

@@ -25,6 +25,7 @@ export interface AppConfig {
   projectariumUrl: string;
   enableProjectarium: boolean;
   busModerationMode: boolean;
+  rawNewsTtlHours: number;
 }
 
 export const config: AppConfig = {
@@ -62,4 +63,5 @@ export const config: AppConfig = {
     'http://127.0.0.1:3000/api',
   enableProjectarium: process.env.ENABLE_PROJECTARIUM !== 'false',
   busModerationMode: process.env.BUS_MODERATION_MODE !== 'false',
+  rawNewsTtlHours: Math.max(1, parseInt(process.env.RAW_NEWS_TTL_HOURS || '72', 10)),
 };

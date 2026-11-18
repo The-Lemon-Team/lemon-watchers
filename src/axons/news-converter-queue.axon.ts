@@ -3,6 +3,8 @@ import { DatabaseService } from '../db/database.service.js';
 import { GeminiSparkAxon } from './gemini-spark.axon.js';
 import { BusRelayAxon } from './bus-relay.axon.js';
 import { MediaCoverAxon } from './media-cover.axon.js';
+import { ArticleExtractorAxon } from './article-extractor.axon.js';
+import { extractFirstImageFromHtml } from './rss-atom-fetcher.axon.js';
 import { RawNewsItem } from '../types/raw-news.types.js';
 import { WatcherArticle } from '../types/article.types.js';
 import { StoryEvent } from '../types/story.types.js';
@@ -13,6 +15,7 @@ export interface NewsConverterQueueOptions {
   gemini: GeminiSparkAxon;
   busRelay: BusRelayAxon;
   mediaCover?: MediaCoverAxon;
+  articleExtractor?: ArticleExtractorAxon;
   onArticleConverted?: (article: WatcherArticle) => void;
   onStoryEvent?: (event: StoryEvent) => void;
   getWatcherConfig?: (watcherId: string) => WatcherConfig | undefined;
@@ -23,6 +26,7 @@ export class NewsConverterQueueAxon {
   private readonly gemini: GeminiSparkAxon;
   private readonly busRelay: BusRelayAxon;
   private readonly mediaCover?: MediaCoverAxon;
+  private readonly articleExtractor: ArticleExtractorAxon;
   private readonly onArticleConverted?: (article: WatcherArticle) => void;
   private readonly onStoryEvent?: (event: StoryEvent) => void;
   private readonly getWatcherConfig?: (watcherId: string) => WatcherConfig | undefined;
@@ -37,6 +41,7 @@ export class NewsConverterQueueAxon {
     this.gemini = options.gemini;
     this.busRelay = options.busRelay;
     this.mediaCover = options.mediaCover;
+    this.articleExtractor = options.articleExtractor || new ArticleExtractorAxon();
     this.onArticleConverted = options.onArticleConverted;
     this.onStoryEvent = options.onStoryEvent;
     this.getWatcherConfig = options.getWatcherConfig;
@@ -115,11 +120,37 @@ export class NewsConverterQueueAxon {
         enabled: true,
       };
 
-      // 1. Enrich with AI (lemon-ai-service / Gemini) or canonical fallback
-      const sparkNote = await this.gemini.enrichRawFeedItem(rawFeedItem, fallbackConfig);
+      // 1. Resolve original article text (feed -> webpage Readability -> AI fallback)
+      const resolvedText = await this.articleExtractor.resolveArticleText({
+        url: item.url,
+        feedText: item.contentRaw || item.description,
+        feedHtml: item.contentRaw,
+      });
 
-      // 1b. Resolve or generate cover image (best-effort)
-      const imgMatch = (item.contentRaw || '').match(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/i);
+      if (resolvedText.text) {
+        rawFeedItem.rawText = resolvedText.text;
+        rawFeedItem.contentOrigin = resolvedText.contentOrigin;
+      } else {
+        rawFeedItem.contentOrigin = 'ai_generated';
+      }
+
+      // 1a. Enrich metadata (and body only when contentOrigin === 'ai_generated')
+      const sparkNote = await this.gemini.enrichRawFeedItem(rawFeedItem, fallbackConfig, {
+        contentOrigin: resolvedText.contentOrigin,
+        originalText: resolvedText.text,
+        sourceLangHint: resolvedText.lang,
+      });
+
+      // 1b. Resolve original news cover (feed/HTML/already-fetched pageHtml/og:image -> Media Hub) or AI fallback
+      const articleUrl = item.url || sparkNote.sourceLink;
+      const pageExtractedCover =
+        !item.imageUrl && resolvedText.pageHtml && this.mediaCover
+          ? this.mediaCover.extractOriginalImageFromHtml(resolvedText.pageHtml, articleUrl)
+          : null;
+      const externalImageUrl =
+        item.imageUrl ||
+        pageExtractedCover ||
+        extractFirstImageFromHtml(item.contentRaw || item.description, articleUrl);
       const cover = this.mediaCover
         ? await this.mediaCover.resolveArticleCover({
             id: sparkNote.id,
@@ -128,7 +159,9 @@ export class NewsConverterQueueAxon {
             category,
             tags: sparkNote.tags,
             coverPrompt: sparkNote.metadata?.coverPrompt,
-            externalImageUrl: imgMatch?.[1],
+            externalImageUrl,
+            articleUrl,
+            preferOriginal: true,
           })
         : null;
 
@@ -141,7 +174,7 @@ export class NewsConverterQueueAxon {
         title: sparkNote.title,
         summary: sparkNote.summary,
         content: sparkNote.rawContent,
-        author: sparkNote.author || watcherTitle,
+        author: sparkNote.author || resolvedText.byline || watcherTitle,
         tags: sparkNote.tags,
         resonanceScore: sparkNote.resonanceScore,
         contentHash: item.contentHash,
@@ -160,7 +193,10 @@ export class NewsConverterQueueAxon {
           coverUrl: cover?.coverUrl || null,
           coverThumbnailUrl: cover?.coverThumbnailUrl || null,
           coverAssetId: cover?.coverAssetId || null,
+          coverSource: cover?.source || null,
+          originalCoverUrl: cover?.originalImageUrl || externalImageUrl || null,
           enrichedBy: sparkNote.metadata?.enrichedBy,
+          contentOrigin: sparkNote.metadata?.contentOrigin || resolvedText.contentOrigin,
           originalTitle: sparkNote.metadata?.originalTitle ?? item.title,
           originalSummary: sparkNote.metadata?.originalSummary ?? item.description,
           sourceLanguage: sparkNote.metadata?.sourceLanguage,
