@@ -15,12 +15,14 @@ export class ArticleDetailModalComponent {
   article = input<WatcherArticle | null>(null);
   publishingBusIds = input<Set<string>>(new Set());
   generatingCoverIds = input<Set<string>>(new Set());
+  fetchingOriginalCoverIds = input<Set<string>>(new Set());
   assistingArticleIds = input<Set<string>>(new Set());
   folderColorMap = input<Map<string, { icon: string; color: string; title: string }>>(new Map());
 
   close = output<void>();
   publishSingleToBus = output<WatcherArticle>();
   generateCover = output<WatcherArticle>();
+  fetchOriginalCover = output<WatcherArticle>();
   assistContent = output<{
     article: WatcherArticle;
     action: 'rewrite' | 'expand' | 'summarize';

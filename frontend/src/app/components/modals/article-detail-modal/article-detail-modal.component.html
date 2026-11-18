@@ -31,7 +31,18 @@
             [src]="item.coverUrl || item.coverThumbnailUrl"
             [alt]="item.title"
             class="w-full max-h-56 object-cover" />
+          @if (item.rawPayload?.['coverSource']) {
+            <span class="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-dark-900/85 border border-dark-700 text-[10px] font-semibold text-slate-200 backdrop-blur">
+              {{ item.rawPayload?.['coverSource'] === 'original' ? '🖼️ Оригинал' : '🎨 AI-обложка' }}
+            </span>
+          }
           <div class="absolute bottom-2 right-2 flex items-center space-x-1.5">
+            <button
+              (click)="fetchOriginalCover.emit(item)"
+              [disabled]="fetchingOriginalCoverIds().has(item.id)"
+              class="px-2.5 py-1 rounded-lg bg-dark-900/85 hover:bg-dark-800 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold backdrop-blur transition disabled:opacity-50">
+              {{ fetchingOriginalCoverIds().has(item.id) ? 'Загрузка...' : '🖼️ Загрузить оригинал' }}
+            </button>
             <button
               (click)="generateCover.emit(item)"
               [disabled]="generatingCoverIds().has(item.id)"
@@ -47,6 +58,12 @@
         <span class="text-[11px] font-semibold text-slate-400">✨ AI-помощь &amp; Media Hub:</span>
         <div class="flex flex-wrap items-center gap-1.5">
           @if (!item.coverUrl && !item.coverThumbnailUrl) {
+            <button
+              (click)="fetchOriginalCover.emit(item)"
+              [disabled]="fetchingOriginalCoverIds().has(item.id)"
+              class="px-2.5 py-1 rounded-lg bg-dark-750 hover:bg-dark-700 text-emerald-300 border border-emerald-500/30 text-[11px] font-medium transition disabled:opacity-50">
+              {{ fetchingOriginalCoverIds().has(item.id) ? '⏳ Оригинал...' : '🖼️ Оригинальная обложка' }}
+            </button>
             <button
               (click)="generateCover.emit(item)"
               [disabled]="generatingCoverIds().has(item.id)"
@@ -117,7 +134,23 @@
       <!-- Full content preview if available -->
       @if (item.content) {
         <div>
-          <h4 class="text-slate-400 font-bold uppercase tracking-wider text-[11px] mb-1">Контент первоисточника</h4>
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <h4 class="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Контент статьи</h4>
+            <div class="flex items-center gap-1.5">
+              @if (item.rawPayload?.['sourceLanguage']) {
+                <span class="px-1.5 py-0.5 rounded bg-dark-800 border border-dark-700 text-[10px] font-mono uppercase text-slate-300">
+                  {{ item.rawPayload?.['sourceLanguage'] }}
+                </span>
+              }
+              @if (item.rawPayload?.['contentOrigin']; as origin) {
+                <span
+                  class="px-2 py-0.5 rounded-md border text-[10px] font-semibold"
+                  [ngClass]="origin === 'ai_generated' ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'">
+                  {{ origin === 'feed' ? '📡 Оригинал (RSS)' : origin === 'scraped' ? '🌐 Оригинал (сайт)' : '🤖 Текст AI' }}
+                </span>
+              }
+            </div>
+          </div>
           <div class="p-3.5 rounded-xl bg-dark-800/80 border border-dark-750 text-slate-300 max-h-48 overflow-y-auto custom-scrollbar whitespace-pre-wrap leading-relaxed">
             {{ item.content }}
           </div>

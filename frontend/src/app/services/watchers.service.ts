@@ -345,6 +345,16 @@ export class WatchersService {
     );
   }
 
+  fetchOriginalCover(
+    id: string,
+    imageUrl?: string
+  ): Observable<{ message: string; article: WatcherArticle }> {
+    return this.http.post<{ message: string; article: WatcherArticle }>(
+      `${this.apiBase}/items/${id}/fetch-original-cover`,
+      imageUrl ? { imageUrl } : {}
+    );
+  }
+
   assistArticleContent(
     id: string,
     options: { action: 'rewrite' | 'expand' | 'summarize' | 'custom'; instruction?: string }

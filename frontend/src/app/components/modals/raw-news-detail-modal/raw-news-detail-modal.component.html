@@ -46,6 +46,15 @@
         </a>
       </div>
 
+      @if (item.imageUrl) {
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Оригинальная обложка из ленты</label>
+          <div class="rounded-lg overflow-hidden border border-dark-700 bg-dark-900">
+            <img [src]="item.imageUrl" [alt]="item.title" class="w-full max-h-44 object-cover" />
+          </div>
+        </div>
+      }
+
       @if (item.description) {
         <div>
           <label class="block text-slate-400 mb-0.5 font-medium">Описание / Аннотация</label>

@@ -138,6 +138,7 @@ export interface RawNewsItem {
   pubDate: string;
   categories: string[];
   contentHash: string;
+  imageUrl?: string | null;
   status: RawNewsStatus;
   noteId?: string | null;
   error?: string | null;

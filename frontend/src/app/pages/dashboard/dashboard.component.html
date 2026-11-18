@@ -246,11 +246,13 @@
     [article]="selectedArticle()"
     [publishingBusIds]="publishingBusIds()"
     [generatingCoverIds]="generatingCoverIds()"
+    [fetchingOriginalCoverIds]="fetchingOriginalCoverIds()"
     [assistingArticleIds]="assistingArticleIds()"
     [folderColorMap]="folderColorMap()"
     (close)="closeArticleModal()"
     (publishSingleToBus)="publishSingleToBus($event)"
     (generateCover)="generateArticleCover($event)"
+    (fetchOriginalCover)="fetchOriginalArticleCover($event)"
     (assistContent)="assistArticleContent($event)"
   />
 

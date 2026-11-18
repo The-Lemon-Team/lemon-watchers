@@ -109,6 +109,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   } | null>(null);
   publishingBusIds = signal<Set<string>>(new Set());
   generatingCoverIds = signal<Set<string>>(new Set());
+  fetchingOriginalCoverIds = signal<Set<string>>(new Set());
   assistingArticleIds = signal<Set<string>>(new Set());
   isPublishingAllBus = signal<boolean>(false);
 
@@ -734,6 +735,33 @@ export class DashboardComponent implements OnInit, OnDestroy {
           return next;
         });
         console.error('Failed to generate article cover:', err);
+      },
+    });
+  }
+
+  fetchOriginalArticleCover(article: WatcherArticle): void {
+    this.fetchingOriginalCoverIds.update((s) => new Set(s).add(article.id));
+    this.watchersService.fetchOriginalCover(article.id).subscribe({
+      next: (res) => {
+        this.fetchingOriginalCoverIds.update((s) => {
+          const next = new Set(s);
+          next.delete(article.id);
+          return next;
+        });
+        this.articles.update((list) =>
+          list.map((a) => (a.id === article.id ? res.article : a)),
+        );
+        if (this.selectedArticle()?.id === article.id) {
+          this.selectedArticle.set(res.article);
+        }
+      },
+      error: (err) => {
+        this.fetchingOriginalCoverIds.update((s) => {
+          const next = new Set(s);
+          next.delete(article.id);
+          return next;
+        });
+        console.error('Failed to fetch original article cover:', err);
       },
     });
   }
