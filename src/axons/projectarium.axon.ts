@@ -4,6 +4,9 @@ export interface ProjectariumAxonOptions {
   projectSlug?: string;
   projectName?: string;
   preferredPort: number;
+  role?: string;
+  icon?: string;
+  healthUrl?: string;
   environment?: 'dev' | 'staging' | 'production';
   networkMode?: 'local' | 'lan' | 'tailscale-lan' | 'tailscale-funnel';
   enabled?: boolean;
@@ -27,6 +30,9 @@ export class ProjectariumAxon {
   private readonly projectSlug: string;
   private readonly projectName: string;
   private readonly preferredPort: number;
+  private readonly role: string;
+  private readonly icon: string;
+  private readonly healthUrl: string;
   private readonly environment: 'dev' | 'staging' | 'production';
   private readonly networkMode: 'local' | 'lan' | 'tailscale-lan' | 'tailscale-funnel';
   private readonly enabled: boolean;
@@ -41,6 +47,9 @@ export class ProjectariumAxon {
     this.projectSlug = options.projectSlug || 'lemon-watchers';
     this.projectName = options.projectName || 'Lemon Watchers';
     this.preferredPort = options.preferredPort;
+    this.role = options.role || 'Reactive News Watchers API & Dashboard';
+    this.icon = options.icon || 'visibility';
+    this.healthUrl = options.healthUrl || `http://localhost:${this.preferredPort}/health`;
     this.environment = options.environment || 'dev';
     this.networkMode = options.networkMode || 'local';
     this.enabled = options.enabled !== false;
@@ -51,8 +60,49 @@ export class ProjectariumAxon {
     return this.registration;
   }
 
+  private async cleanupExistingInstances(): Promise<void> {
+    try {
+      const res = await fetch(
+        `${this.baseUrl}/projectarium/projects/${encodeURIComponent(this.projectSlug)}`,
+        { signal: AbortSignal.timeout(3000) }
+      );
+      if (!res.ok) return;
+
+      const project = (await res.json()) as any;
+      const apps: any[] = Array.isArray(project?.apps) ? project.apps : [];
+      const stale = apps.filter(
+        (a) =>
+          a.appName === this.appName &&
+          (a.networkMode || 'local') === this.networkMode &&
+          a.instanceId &&
+          a.leaseToken
+      );
+
+      for (const app of stale) {
+        try {
+          await fetch(`${this.baseUrl}/projectarium/release`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instanceId: app.instanceId,
+              leaseToken: app.leaseToken,
+              author: 'lemon-watchers',
+            }),
+            signal: AbortSignal.timeout(2500),
+          });
+        } catch {
+          // Ignore individual cleanup errors
+        }
+      }
+    } catch {
+      // Best-effort cleanup before registering
+    }
+  }
+
   async register(): Promise<ProjectariumRegistration | null> {
     if (!this.enabled) return null;
+
+    await this.cleanupExistingInstances();
 
     try {
       const res = await fetch(`${this.baseUrl}/projectarium/register`, {
@@ -63,12 +113,12 @@ export class ProjectariumAxon {
           projectName: this.projectName,
           appName: this.appName,
           host: 'localhost',
-          role: 'Reactive News Watchers API & Dashboard',
-          icon: 'visibility',
+          role: this.role,
+          icon: this.icon,
           preferredPort: this.preferredPort,
           environment: this.environment,
           networkMode: this.networkMode,
-          healthUrl: `http://localhost:${this.preferredPort}/health`,
+          healthUrl: this.healthUrl,
           author: 'lemon-watchers',
         }),
         signal: AbortSignal.timeout(4000),

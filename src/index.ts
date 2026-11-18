@@ -28,11 +28,28 @@ async function bootstrap() {
 
   const projectarium = new ProjectariumAxon({
     baseUrl: config.projectariumUrl,
+    appName: 'lemon-watchers-api',
     preferredPort: config.port,
+    role: 'Reactive News Watchers NestJS API & SSE Engine',
+    icon: 'visibility',
+    healthUrl: `http://localhost:${config.port}/health`,
     enabled: config.enableProjectarium,
   });
 
-  const registration = await projectarium.register();
+  const projectariumWeb = new ProjectariumAxon({
+    baseUrl: config.projectariumUrl,
+    appName: 'lemon-watchers-web',
+    preferredPort: config.frontendPort,
+    role: 'Angular 21 Watchers Dashboard & Stream Console',
+    icon: 'dashboard',
+    healthUrl: `http://localhost:${config.frontendPort}/`,
+    enabled: config.enableProjectarium,
+  });
+
+  const [registration] = await Promise.all([
+    projectarium.register(),
+    projectariumWeb.register(),
+  ]);
   const listenPort = registration?.port ?? config.port;
 
   const engine = new WatchersEngine(config);
@@ -42,13 +59,13 @@ async function bootstrap() {
     await engine.initialize();
     await server.start();
   } catch (err) {
-    await projectarium.release();
+    await Promise.all([projectarium.release(), projectariumWeb.release()]);
     throw err;
   }
 
   const shutdown = async () => {
     console.log('\n🛑 [Lemon-Watchers] Gracefully shutting down...');
-    await projectarium.release();
+    await Promise.all([projectarium.release(), projectariumWeb.release()]);
     await server.stop();
     await engine.shutdown();
     process.exit(0);

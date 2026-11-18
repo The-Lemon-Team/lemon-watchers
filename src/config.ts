@@ -24,6 +24,7 @@ export interface AppConfig {
   enableCoverGeneration: boolean;
   projectariumUrl: string;
   enableProjectarium: boolean;
+  frontendPort: number;
   busModerationMode: boolean;
   rawNewsTtlHours: number;
 }
@@ -62,6 +63,7 @@ export const config: AppConfig = {
     process.env.CORE_COMBINATOR_URL ||
     'http://127.0.0.1:3000/api',
   enableProjectarium: process.env.ENABLE_PROJECTARIUM !== 'false',
+  frontendPort: parseInt(process.env.FRONTEND_PORT || '4200', 10),
   busModerationMode: process.env.BUS_MODERATION_MODE !== 'false',
   rawNewsTtlHours: Math.max(1, parseInt(process.env.RAW_NEWS_TTL_HOURS || '72', 10)),
 };
